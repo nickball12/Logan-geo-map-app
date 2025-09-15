@@ -213,37 +213,54 @@
                     <td class="{% if editable %}editable-cell{% endif %}" data-field="zip_code">{{ address.zip_code }}</td>
                     <td class="{% if editable %}editable-cell{% endif %}" data-field="county">{{ address.county }}</td>
                     <td>{{ address.coordinates }}</td>
-                    <td>{{ address.priority_score }}</td>
-                    <td>{{ address.last_inspection_date }}</td>
+                    <td><input type="number" value="{{ address.priority_score }}" class="edit-priority" style="width:70px"></td>
+                    <td><input type="date" value="{{ address.last_inspection_date }}" class="edit-inspection" style="width:130px"></td>
                     <td>{{ address.days_since_inspection }}</td>
                     <td>
-                        <div class="status-container">
-                            {% if address.has_complaint %}
-                                <span class="status-badge complaint">Complaint</span>
-                            {% endif %}
-                            {% if address.needs_reinspection %}
-                                <span class="status-badge reinspection">Reinspection</span>
-                                {% if address.reinspection_reason %}
-                                    <span class="status-reason">({{ address.reinspection_reason }})</span>
-                                {% endif %}
-                            {% endif %}
-                            {% if address.out_of_service_pumps > 0 %}
-                                <span class="status-badge out-of-service">Out of Service ({{ address.out_of_service_pumps }})</span>
-                                {% if address.out_of_service_details %}
-                                    <span class="status-reason">({{ address.out_of_service_details }})</span>
-                                {% endif %}
-                            {% endif %}
-                            {% if not address.has_complaint and not address.needs_reinspection and address.out_of_service_pumps == 0 %}
-                                <span class="status-badge normal">Normal</span>
-                            {% endif %}
-                        </div>
+                        <select class="edit-status">
+                            <option value="normal" {% if not address.has_complaint and not address.needs_reinspection and address.out_of_service_pumps == 0 %}selected{% endif %}>Normal</option>
+                            <option value="complaint" {% if address.has_complaint %}selected{% endif %}>Complaint</option>
+                            <option value="reinspection" {% if address.needs_reinspection %}selected{% endif %}>Reinspection</option>
+                            <option value="out_of_service" {% if address.out_of_service_pumps > 0 %}selected{% endif %}>Out of Service</option>
+                        </select>
+                        <button onclick="saveRow(this)" style="margin-left:8px;">Save</button>
                     </td>
+    <script>
+    function saveRow(btn) {
+        const row = btn.closest('tr');
+        const businessId = row.getAttribute('data-business-id');
+        const priority = row.querySelector('.edit-priority').value;
+        const inspection = row.querySelector('.edit-inspection').value;
+        const status = row.querySelector('.edit-status').value;
+        fetch('/update_station', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ business_id: businessId, priority_score: priority, last_inspection_date: inspection, status: status })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                btn.textContent = 'Saved!';
+                setTimeout(() => { btn.textContent = 'Save'; }, 1200);
+            } else {
+                btn.textContent = 'Error';
+                setTimeout(() => { btn.textContent = 'Save'; }, 1200);
+            }
+        })
+        .catch(() => {
+            btn.textContent = 'Error';
+            setTimeout(() => { btn.textContent = 'Save'; }, 1200);
+        });
+    }
+    </script>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
-    
+    <footer style="margin-top:40px; text-align:center; color:#888;">
+        <a href="https://github.com/nickball12/Logan-geo-map-app" target="_blank" style="color:#3498db; text-decoration:none;">View this project on GitHub</a>
+    </footer>
     <script>
         function filterAddresses() {
             const searchText = document.getElementById('searchBox').value.toLowerCase();

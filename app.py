@@ -1,3 +1,16 @@
+@app.route('/update_station', methods=['POST'])
+def update_station_api():
+    data = request.get_json()
+    business_id = data.get('business_id')
+    priority_score = data.get('priority_score')
+    last_inspection_date = data.get('last_inspection_date')
+    status = data.get('status')
+    try:
+        # Call your update_station logic (from data_store.py)
+        update_station(business_id, priority_score, last_inspection_date, status)
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
 from flask import Flask, render_template, request, redirect, url_for, session, Response, jsonify
 import pandas as pd
 import numpy as np
