@@ -456,6 +456,130 @@
             margin-bottom: 20px;
             border: 1px solid #c3e6cb;
         }
+        
+        /* Route Results Styles */
+        .route-summary-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+            padding: 20px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .summary-item {
+            text-align: center;
+            padding: 15px;
+            background-color: white;
+            border-radius: 6px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .route-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            font-size: 14px;
+        }
+        
+        .route-table th,
+        .route-table td {
+            padding: 12px 8px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .route-table th {
+            background-color: #f8f9fa;
+            font-weight: bold;
+            position: sticky;
+            top: 0;
+        }
+        
+        .route-table tr:hover {
+            background-color: #f5f5f5;
+        }
+        
+        .route-details {
+            max-height: 500px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            margin-top: 20px;
+        }
+        
+        .section {
+            margin: 30px 0;
+            padding: 20px;
+            border-radius: 8px;
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+        }
+        
+        .section h2 {
+            margin-top: 0;
+            color: #2c3e50;
+            border-bottom: 2px solid #3498db;
+            padding-bottom: 10px;
+        }
+        
+        /* Route Cards Styles */
+        .routes-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+        
+        .route-card {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+            cursor: pointer;
+        }
+        
+        .route-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+        }
+        
+        .route-card h4 {
+            margin-top: 0;
+            margin-bottom: 15px;
+            color: #2c3e50;
+        }
+        
+        .route-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+        
+        .route-stats span {
+            padding: 4px 0;
+        }
+        
+        .btn-small {
+            padding: 8px 16px;
+            font-size: 14px;
+            background-color: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        
+        .btn-small:hover {
+            background-color: #2980b9;
+        }
     </style>
 </head>
 <body>
@@ -563,6 +687,30 @@
         </form>
         <div id="route-status" class="status-info" style="display:none;"></div>
     </div>
+    
+    <!-- Route Results Section -->
+    <div id="route-results-section" class="section" style="display:none;">
+        <h2>Latest Route Plan</h2>
+        <div id="route-summary" class="route-summary">
+            <!-- Route summary will be populated here -->
+        </div>
+        <div id="route-details" class="route-details">
+            <!-- Detailed route will be populated here -->
+        </div>
+    </div>
+    
+    <!-- Saved Routes Section -->
+    <div id="saved-routes-section" class="section" style="display:none;">
+        <h2>Saved Routes</h2>
+        <div class="button-group">
+            <button id="view-saved-routes-btn" class="btn">Load Saved Routes</button>
+            <button id="view-schedule-btn" class="btn">View Schedule</button>
+        </div>
+        <div id="saved-routes-content">
+            <!-- Saved routes will be loaded here -->
+        </div>
+    </div>
+    
     </div>
 
     {% if error %}
@@ -695,7 +843,9 @@
             // Status elements
             const uploadStatus = document.getElementById('upload-status');
             const routeStatus = document.getElementById('route-status');
-            
+            const routeResultsSection = document.getElementById('route-results-section');
+            const routeSummary = document.getElementById('route-summary');
+            const routeDetails = document.getElementById('route-details');
             
             // Legacy elements (for backward compatibility)
             const loadingOverlay = document.getElementById('loading-overlay');
@@ -778,23 +928,38 @@
                         connectToEventSource();
                     }
                     
+                    // Create AbortController for timeout
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 600000); // 10 minutes timeout
+                    
                     fetch('/plan_route', {
                         method: 'POST',
-                        body: formData
+                        body: formData,
+                        signal: controller.signal
                     })
                     .then(response => {
+                        clearTimeout(timeoutId); // Clear timeout if successful
                         if (response.ok) {
                             // Route generation started, will be handled by SSE
                             showStatus(routeStatus, 'Route generation started...', 'processing');
+                            
+                            // Start polling for completion since we might timeout
+                            pollForRouteCompletion();
                         } else {
                             throw new Error('Failed to start route generation');
                         }
                     })
                     .catch(error => {
-                        showStatus(routeStatus, 'Error generating route: ' + error.message, 'error');
+                        clearTimeout(timeoutId); // Clear timeout on error
+                        if (error.name === 'AbortError') {
+                            showStatus(routeStatus, 'Route generation timed out after 10 minutes. Please try with fewer stations or shorter work hours.', 'error');
+                        } else {
+                            showStatus(routeStatus, 'Error generating route: ' + error.message, 'error');
+                        }
                         if (loadingOverlay) {
                             loadingOverlay.style.display = 'none';
                         }
+                        document.getElementById('route-btn').disabled = false;
                     });
                 });
             }
@@ -804,6 +969,12 @@
                 element.className = `status-info ${type}`;
                 element.textContent = message;
             }
+            
+            // Load saved routes on page load
+            loadSavedRoutesList();
+            
+            // Also try to load the latest route if available
+            loadLatestRoute();
             
             // File Upload
             if (uploadForm) {
@@ -862,10 +1033,16 @@
                         if (data.success) {
                             showStatus(routeStatus, data.message, 'success');
                             
-                            // Redirect to show the route result
-                            setTimeout(() => {
-                                window.location.reload();
-                            }, 2000);
+                            // Load and display the route
+                            loadLatestRoute();
+                            
+                            // Hide loading overlay
+                            if (loadingOverlay) {
+                                loadingOverlay.style.display = 'none';
+                            }
+                            
+                            // Re-enable the button
+                            document.getElementById('route-btn').disabled = false;
                         } else {
                             showStatus(routeStatus, data.error || 'Route planning failed', 'error');
                             document.getElementById('route-btn').disabled = false;
@@ -890,9 +1067,10 @@
 
             if (viewSavedRoutesBtn) {
                 viewSavedRoutesBtn.addEventListener('click', function() {
-                    loadSavedRoutes();
+                    loadSavedRoutesList();
                     if (savedRoutesSection) {
                         savedRoutesSection.style.display = 'block';
+                        savedRoutesSection.scrollIntoView({ behavior: 'smooth' });
                     }
                 });
             }
@@ -1030,6 +1208,222 @@
                         if (savedRoutesContent) {
                             savedRoutesContent.innerHTML = '<p>Error loading saved routes. Please try again.</p>';
                         }
+                    });
+            }
+            
+            // Function to poll for route completion (backup for timeout issues)
+            function pollForRouteCompletion() {
+                const pollInterval = setInterval(() => {
+                    fetch('/get_latest_route')
+                        .then(response => response.json())
+                        .then(data => {
+                            // If we get a successful route, stop polling and display it
+                            if (data.success && data.route) {
+                                clearInterval(pollInterval);
+                                
+                                showStatus(routeStatus, 'Route generation completed!', 'success');
+                                displayRoute(data.route);
+                                
+                                // Show the route results section
+                                if (routeResultsSection) {
+                                    routeResultsSection.style.display = 'block';
+                                    routeResultsSection.scrollIntoView({ behavior: 'smooth' });
+                                }
+                                
+                                // Hide loading overlay and re-enable button
+                                if (loadingOverlay) {
+                                    loadingOverlay.style.display = 'none';
+                                }
+                                document.getElementById('route-btn').disabled = false;
+                                
+                                // Also refresh the saved routes list
+                                loadSavedRoutesList();
+                            }
+                        })
+                        .catch(error => {
+                            console.log('Polling for route completion...');
+                        });
+                }, 5000); // Poll every 5 seconds
+                
+                // Stop polling after 15 minutes
+                setTimeout(() => {
+                    clearInterval(pollInterval);
+                }, 900000);
+            }
+            
+            // Function to load and display the latest route
+            function loadLatestRoute() {
+                fetch('/get_latest_route')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success && data.route) {
+                            displayRoute(data.route);
+                            
+                            // Show the route results section
+                            if (routeResultsSection) {
+                                routeResultsSection.style.display = 'block';
+                                routeResultsSection.scrollIntoView({ behavior: 'smooth' });
+                            }
+                            
+                            // Show saved routes section as well
+                            if (savedRoutesSection) {
+                                savedRoutesSection.style.display = 'block';
+                            }
+                        } else {
+                            console.error('No route data available');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error loading latest route:', error);
+                    });
+            }
+            
+            // Function to display route data
+            function displayRoute(route) {
+                if (!routeSummary || !routeDetails) return;
+                
+                // Display route summary
+                const summary = route.summary || {};
+                routeSummary.innerHTML = `
+                    <div class="route-summary-grid">
+                        <div class="summary-item">
+                            <strong>Total Stops:</strong> ${summary.total_stops || 0}
+                        </div>
+                        <div class="summary-item">
+                            <strong>Total Distance:</strong> ${summary.total_distance || 'N/A'}
+                        </div>
+                        <div class="summary-item">
+                            <strong>Total Time:</strong> ${summary.total_time || 'N/A'}
+                        </div>
+                        <div class="summary-item">
+                            <strong>Total Pumps:</strong> ${summary.total_pumps || 0}
+                        </div>
+                    </div>
+                `;
+                
+                // Display detailed route
+                if (route.stops && route.stops.length > 0) {
+                    let routeTable = `
+                        <h3>Route Details</h3>
+                        <table class="route-table">
+                            <thead>
+                                <tr>
+                                    <th>Stop #</th>
+                                    <th>Station Name</th>
+                                    <th>Address</th>
+                                    <th>Status</th>
+                                    <th>Pumps</th>
+                                    <th>Travel Time</th>
+                                    <th>Distance</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                    `;
+                    
+                    route.stops.forEach((stop, index) => {
+                        routeTable += `
+                            <tr>
+                                <td>${index}</td>
+                                <td>${stop.name || 'Unknown'}</td>
+                                <td>${stop.address || 'Unknown'}</td>
+                                <td>${stop.status || 'Normal'}</td>
+                                <td>${stop.pumps || 2}</td>
+                                <td>${stop.travel_time || 'N/A'}</td>
+                                <td>${stop.distance || 'N/A'}</td>
+                            </tr>
+                        `;
+                    });
+                    
+                    routeTable += `
+                            </tbody>
+                        </table>
+                    `;
+                    
+                    routeDetails.innerHTML = routeTable;
+                } else {
+                    routeDetails.innerHTML = '<p>No route details available.</p>';
+                }
+            }
+            
+            // Function to load saved routes list
+            function loadSavedRoutesList() {
+                fetch('/get_saved_routes')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success && data.routes) {
+                            displaySavedRoutesList(data.routes);
+                        } else {
+                            console.error('No saved routes available');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error loading saved routes list:', error);
+                    });
+            }
+            
+            // Function to display saved routes list
+            function displaySavedRoutesList(routes) {
+                if (!savedRoutesContent) return;
+                
+                if (routes.length === 0) {
+                    savedRoutesContent.innerHTML = '<p>No saved routes found.</p>';
+                    return;
+                }
+                
+                let routesHtml = `
+                    <h3>Saved Routes</h3>
+                    <div class="routes-grid">
+                `;
+                
+                routes.forEach(route => {
+                    routesHtml += `
+                        <div class="route-card" data-filename="${route.filename}">
+                            <h4>${route.display_name}</h4>
+                            <div class="route-stats">
+                                <span><strong>Stops:</strong> ${route.stops}</span>
+                                <span><strong>Pumps:</strong> ${route.pumps}</span>
+                                <span><strong>Time:</strong> ${route.time}</span>
+                                <span><strong>Distance:</strong> ${route.distance}</span>
+                            </div>
+                            <button class="view-route-btn btn-small" data-filename="${route.filename}">
+                                View Route
+                            </button>
+                        </div>
+                    `;
+                });
+                
+                routesHtml += '</div>';
+                savedRoutesContent.innerHTML = routesHtml;
+                
+                // Add click handlers for view buttons
+                document.querySelectorAll('.view-route-btn').forEach(btn => {
+                    btn.addEventListener('click', function() {
+                        const filename = this.getAttribute('data-filename');
+                        loadRouteByFilename(filename);
+                    });
+                });
+            }
+            
+            // Function to load a specific route by filename
+            function loadRouteByFilename(filename) {
+                fetch(`/get_route_by_filename/${filename}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success && data.route) {
+                            displayRoute(data.route);
+                            
+                            // Show the route results section
+                            if (routeResultsSection) {
+                                routeResultsSection.style.display = 'block';
+                                routeResultsSection.scrollIntoView({ behavior: 'smooth' });
+                            }
+                        } else {
+                            showStatus(routeStatus, 'Failed to load selected route', 'error');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error loading route:', error);
+                        showStatus(routeStatus, 'Error loading selected route', 'error');
                     });
             }
         });

@@ -34,6 +34,8 @@ STARTING_LOCATION = {
 # Geocoding cache to store previously geocoded addresses
 GEOCODE_CACHE_FILE = 'cache/geocode_cache.pkl'
 geocode_cache = {}
+# Flag to control cache saving frequency (disable during route planning to prevent Flask reloads)
+_cache_save_enabled = True
 
 # Load geocoding cache from file if it exists
 try:
@@ -97,8 +99,8 @@ def get_coordinates_local(address, use_cache=True):
             if use_cache:
                 # Save to cache
                 geocode_cache[address] = result
-                # Save cache to file periodically (every 10 new entries)
-                if len(geocode_cache) % 10 == 0:
+                # Save cache to file periodically (every 10 new entries) only if enabled
+                if _cache_save_enabled and len(geocode_cache) % 10 == 0:
                     save_geocode_cache()
             return result
         else:
@@ -121,7 +123,7 @@ def get_coordinates_local(address, use_cache=True):
                         result = f"{location.latitude}, {location.longitude}"
                         if use_cache:
                             geocode_cache[address] = result
-                            if len(geocode_cache) % 10 == 0:
+                            if _cache_save_enabled and len(geocode_cache) % 10 == 0:
                                 save_geocode_cache()
                         return result
                 
@@ -134,7 +136,7 @@ def get_coordinates_local(address, use_cache=True):
                     result = f"{location.latitude}, {location.longitude}"
                     if use_cache:
                         geocode_cache[address] = result
-                        if len(geocode_cache) % 10 == 0:
+                        if _cache_save_enabled and len(geocode_cache) % 10 == 0:
                             save_geocode_cache()
                     return result
                 
@@ -148,7 +150,7 @@ def get_coordinates_local(address, use_cache=True):
                         result = f"{location.latitude}, {location.longitude}"
                         if use_cache:
                             geocode_cache[address] = result
-                            if len(geocode_cache) % 10 == 0:
+                            if _cache_save_enabled and len(geocode_cache) % 10 == 0:
                                 save_geocode_cache()
                         return result
             
@@ -177,6 +179,20 @@ def save_geocode_cache():
         logger.info(f"Saved {len(geocode_cache)} geocoded addresses to cache")
     except Exception as e:
         logger.error(f"Error saving geocode cache: {e}")
+
+def disable_cache_saves():
+    """Disable frequent cache saves during route planning to prevent Flask reloads"""
+    global _cache_save_enabled
+    _cache_save_enabled = False
+
+def enable_cache_saves():
+    """Re-enable frequent cache saves after route planning"""
+    global _cache_save_enabled
+    _cache_save_enabled = True
+
+def force_save_cache():
+    """Force save the cache regardless of the flag state"""
+    save_geocode_cache()
 
 def calculate_travel_time(coord1, coord2):
     """
@@ -925,83 +941,92 @@ def plan_route_from_geocoded_stations(stations, hours=8, max_stations=None, max_
     Returns:
         List of route stops or None if failed
     """
-    if progress_callback:
-        progress_callback(1, 5, 'Filtering stations by type...', False, 'planning', 'Route Planning')
+    # Disable frequent cache saves during route planning to prevent Flask reloads
+    disable_cache_saves()
     
-    # Filter stations by type
-    filtered_stations = []
-    for station in stations:
-        # Check station type and include based on filters
-        include_station = False
+    try:
+        if progress_callback:
+            progress_callback(1, 5, 'Filtering stations by type...', False, 'planning', 'Route Planning')
         
-        if include_normal and not any([station.needs_reinspection, station.has_complaint, station.has_out_of_service_pump]):
-            include_station = True
-        if include_complaints and station.has_complaint:
-            include_station = True
-        if include_reinspections and station.needs_reinspection:
-            include_station = True
-        if include_out_of_service and station.has_out_of_service_pump:
-            include_station = True
+        # Filter stations by type
+        filtered_stations = []
+        for station in stations:
+            # Check station type and include based on filters
+            include_station = False
             
-        if include_station:
-            filtered_stations.append(station)
-    
-    if not filtered_stations:
-        logger.warning("No stations match the selected filters")
-        return None
-    
-    logger.info(f"Filtered to {len(filtered_stations)} stations based on type filters")
-    
-    if progress_callback:
-        progress_callback(2, 5, f'Using {len(filtered_stations)} stations, sorting by priority...', 
-                        False, 'planning', 'Route Planning')
-    
-    # Sort stations by priority
-    filtered_stations.sort(key=lambda x: x.priority_score, reverse=True)
-    
-    if progress_callback:
-        progress_callback(3, 5, f'Calculating travel times for {len(filtered_stations)} stations...', 
-                        False, 'planning', 'Route Planning')
-    
-    # Calculate travel times and create distance matrix
-    travel_times_df = calculate_drive_times(filtered_stations, progress_callback, cancellation_event=cancellation_event)
-    
-    if cancellation_event and cancellation_event.is_set():
-        return None
+            if include_normal and not any([station.needs_reinspection, station.has_complaint, station.has_out_of_service_pump]):
+                include_station = True
+            if include_complaints and station.has_complaint:
+                include_station = True
+            if include_reinspections and station.needs_reinspection:
+                include_station = True
+            if include_out_of_service and station.has_out_of_service_pump:
+                include_station = True
+                
+            if include_station:
+                filtered_stations.append(station)
         
-    if travel_times_df is None:
-        logger.error("Failed to calculate travel times")
-        return None
-    
-    if cancellation_event and cancellation_event.is_set():
-        return None
-    
-    if progress_callback:
-        progress_callback(4, 5, 'Running optimization algorithm...', False, 'planning', 'Route Planning')
-    
-    # Create data model
-    data_model = create_data_model(filtered_stations, travel_times_df, hours, max_stations, max_pumps, time_between_stops)
-    
-    # Solve the routing problem
-    solution, manager, routing = solve_route(
-        data_model, 
-        progress_callback, 
-        cancellation_event,
-        max_pumps,
-        max_stations
-    )
-    
-    if progress_callback:
-        if solution:
-            progress_callback(5, 5, 'Extracting route plan...', False, 'planning', 'Route Planning Complete')
-        else:
-            progress_callback(5, 5, 'Route planning failed', True, 'planning', 'Route Planning Failed')
+        if not filtered_stations:
+            logger.warning("No stations match the selected filters")
             return None
-    
-    # Extract the route plan from the solution
-    if solution:
-        route_plan = extract_route_plan(solution, manager, routing, filtered_stations)
-        return route_plan
-    else:
-        logger.warning("No solution found")
-        return None
+        
+        logger.info(f"Filtered to {len(filtered_stations)} stations based on type filters")
+        
+        if progress_callback:
+            progress_callback(2, 5, f'Using {len(filtered_stations)} stations, sorting by priority...', 
+                            False, 'planning', 'Route Planning')
+        
+        # Sort stations by priority
+        filtered_stations.sort(key=lambda x: x.priority_score, reverse=True)
+        
+        if progress_callback:
+            progress_callback(3, 5, f'Calculating travel times for {len(filtered_stations)} stations...', 
+                            False, 'planning', 'Route Planning')
+        
+        # Calculate travel times and create distance matrix
+        travel_times_df = calculate_drive_times(filtered_stations, progress_callback, cancellation_event=cancellation_event)
+        
+        if cancellation_event and cancellation_event.is_set():
+            return None
+            
+        if travel_times_df is None:
+            logger.error("Failed to calculate travel times")
+            return None
+        
+        if cancellation_event and cancellation_event.is_set():
+            return None
+        
+        if progress_callback:
+            progress_callback(4, 5, 'Running optimization algorithm...', False, 'planning', 'Route Planning')
+        
+        # Create data model
+        data_model = create_data_model(filtered_stations, travel_times_df, hours, max_stations, max_pumps, time_between_stops)
+        
+        # Solve the routing problem
+        solution, manager, routing = solve_route(
+            data_model, 
+            progress_callback, 
+            cancellation_event,
+            max_pumps,
+            max_stations
+        )
+        
+        if progress_callback:
+            if solution:
+                progress_callback(5, 5, 'Extracting route plan...', False, 'planning', 'Route Planning Complete')
+            else:
+                progress_callback(5, 5, 'Route planning failed', True, 'planning', 'Route Planning Failed')
+                return None
+        
+        # Extract the route plan from the solution
+        if solution:
+            route_plan = extract_route_plan(solution, manager, routing, filtered_stations)
+            return route_plan
+        else:
+            logger.warning("No solution found")
+            return None
+            
+    finally:
+        # Re-enable cache saves and force save any new geocoded addresses
+        enable_cache_saves()
+        force_save_cache()

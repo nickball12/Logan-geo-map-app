@@ -609,6 +609,211 @@ def plan_route():
         logger.error(f"Error planning route: {e}", exc_info=True)
         return jsonify({'error': f'Error planning route: {str(e)}'}), 500
 
+@app.route('/get_latest_route', methods=['GET'])
+def get_latest_route():
+    """Get the latest generated route plan"""
+    try:
+        # Try to get route from session first
+        if 'route_plan' in session and session['route_plan']:
+            route_plan = session['route_plan']
+            
+            # Format route data for display
+            route_data = format_route_for_display(route_plan)
+            
+            return jsonify({
+                'success': True,
+                'route': route_data
+            })
+        else:
+            # Try to load from latest route file
+            try:
+                import json
+                import os
+                from pathlib import Path
+                
+                # Look for latest route file
+                output_dir = Path("output")
+                if output_dir.exists():
+                    route_files = list(output_dir.glob("route_plan_*.json"))
+                    if route_files:
+                        # Get the most recent file
+                        latest_file = max(route_files, key=lambda x: x.stat().st_mtime)
+                        
+                        with open(latest_file, 'r') as f:
+                            route_data = json.load(f)
+                            
+                        return jsonify({
+                            'success': True,
+                            'route': route_data
+                        })
+                
+                return jsonify({'success': False, 'error': 'No route available'})
+                
+            except Exception as file_error:
+                logger.error(f"Error loading route from file: {file_error}")
+                return jsonify({'success': False, 'error': 'Failed to load route'})
+        
+    except Exception as e:
+        logger.error(f"Error getting latest route: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)})
+
+def format_route_for_display(route_plan):
+    """Format route plan data for frontend display"""
+    if not route_plan:
+        return None
+        
+    # Calculate summary statistics
+    total_stops = len(route_plan) - 1  # Subtract starting location
+    total_pumps = 0
+    total_time = 0
+    total_distance = 0
+    
+    stops_data = []
+    
+    for i, stop in enumerate(route_plan):
+        stop_data = {
+            'name': getattr(stop, 'name', f'Station {i}'),
+            'address': getattr(stop, 'full_address', getattr(stop, 'address', 'Unknown')),
+            'pumps': getattr(stop, 'num_pumps', 2),
+            'travel_time': f"{getattr(stop, 'travel_time', 0)} min",
+            'distance': f"{getattr(stop, 'distance', 0):.1f} miles",
+            'status': 'Normal'
+        }
+        
+        # Determine status based on station attributes
+        if hasattr(stop, 'needs_reinspection') and stop.needs_reinspection:
+            stop_data['status'] = 'Reinspection'
+        elif hasattr(stop, 'has_complaint') and stop.has_complaint:
+            stop_data['status'] = 'Complaint'
+        elif hasattr(stop, 'has_out_of_service_pump') and stop.has_out_of_service_pump:
+            stop_data['status'] = 'Out of Service'
+            
+        stops_data.append(stop_data)
+        
+        # Add to totals
+        total_pumps += getattr(stop, 'num_pumps', 2)
+        total_time += getattr(stop, 'travel_time', 0)
+        total_distance += getattr(stop, 'distance', 0)
+    
+    return {
+        'summary': {
+            'total_stops': total_stops,
+            'total_pumps': total_pumps,
+            'total_time': f"{total_time/60:.1f} hours",
+            'total_distance': f"{total_distance:.1f} miles"
+        },
+        'stops': stops_data
+    }
+
+@app.route('/get_saved_routes', methods=['GET'])
+def get_saved_routes():
+    """Get list of all saved routes"""
+    try:
+        import json
+        import os
+        from pathlib import Path
+        from datetime import datetime
+        
+        routes_list = []
+        output_dir = Path("output")
+        
+        if output_dir.exists():
+            route_files = list(output_dir.glob("route_plan_*.json"))
+            
+            for route_file in sorted(route_files, key=lambda x: x.stat().st_mtime, reverse=True):
+                try:
+                    # Extract date from filename
+                    filename = route_file.stem
+                    date_part = filename.replace('route_plan_', '')
+                    
+                    # Format date for display
+                    if len(date_part) >= 8:
+                        try:
+                            date_obj = datetime.strptime(date_part[:8], '%Y%m%d')
+                            formatted_date = date_obj.strftime('%B %d, %Y')
+                        except:
+                            formatted_date = date_part
+                    else:
+                        formatted_date = date_part
+                    
+                    # Load route to get basic info
+                    with open(route_file, 'r') as f:
+                        route_data = json.load(f)
+                    
+                    # Extract basic stats
+                    stops_count = len(route_data.get('stops', [])) - 1 if route_data.get('stops') else 0
+                    summary = route_data.get('summary', {})
+                    
+                    routes_list.append({
+                        'filename': route_file.name,
+                        'display_name': f"Route - {formatted_date}",
+                        'date': formatted_date,
+                        'stops': stops_count,
+                        'pumps': summary.get('total_pumps', 'N/A'),
+                        'time': summary.get('total_time', 'N/A'),
+                        'distance': summary.get('total_distance', 'N/A')
+                    })
+                    
+                except Exception as file_error:
+                    logger.error(f"Error processing route file {route_file}: {file_error}")
+                    continue
+        
+        return jsonify({
+            'success': True,
+            'routes': routes_list
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting saved routes: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/get_route_by_filename/<filename>', methods=['GET'])
+def get_route_by_filename(filename):
+    """Get a specific route by filename"""
+    try:
+        import json
+        from pathlib import Path
+        
+        output_dir = Path("output")
+        route_file = output_dir / filename
+        
+        if not route_file.exists():
+            return jsonify({'success': False, 'error': 'Route file not found'})
+        
+        with open(route_file, 'r') as f:
+            route_data = json.load(f)
+            
+        # Convert JSON data back to format compatible with format_route_for_display
+        route_plan = route_data.get('route_plan', [])
+        
+        # Create simple objects with the required attributes
+        class SimpleStop:
+            def __init__(self, stop_data):
+                self.name = stop_data.get('name', 'Unknown')
+                self.full_address = stop_data.get('full_address', stop_data.get('address', 'Unknown'))
+                self.address = stop_data.get('address', 'Unknown')
+                self.num_pumps = stop_data.get('num_pumps', stop_data.get('pumps_to_inspect', 2))
+                self.travel_time = stop_data.get('travel_time', 0)
+                self.distance = stop_data.get('distance', 0)
+                self.needs_reinspection = stop_data.get('reinspection', False)
+                self.has_complaint = stop_data.get('complaint', False) 
+                self.has_out_of_service_pump = stop_data.get('out_of_service', False)
+        
+        # Convert to objects
+        route_objects = [SimpleStop(stop) for stop in route_plan]
+        
+        # Format for display
+        formatted_route = format_route_for_display(route_objects)
+        
+        return jsonify({
+            'success': True,
+            'route': formatted_route
+        })
+        
+    except Exception as e:
+        logger.error(f"Error loading route {filename}: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': str(e)})
+
 @app.route('/addresses')
 def addresses():
     """Show all extracted addresses with duplicate detection"""
@@ -1452,4 +1657,5 @@ def delete_station():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    app.run(debug=True, host="0.0.0.0", port=port)
+    # Disable debug mode to prevent auto-reload interruptions during route planning
+    app.run(debug=False, host="0.0.0.0", port=port)
