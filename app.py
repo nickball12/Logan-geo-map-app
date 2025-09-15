@@ -1,3 +1,8 @@
+
+# ...existing code...
+
+# Place this after app = Flask(__name__) and all config lines
+
 @app.route('/update_station', methods=['POST'])
 def update_station_api():
     data = request.get_json()
