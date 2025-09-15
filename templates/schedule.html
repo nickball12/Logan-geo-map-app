@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Station Schedule View</title>
+    <style>
+        body { font-family: sans-serif; margin: 2em; }
+        h1, h2 { color: #2c3e50; }
+        
+        .schedule-container {
+            margin-top: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            padding: 20px;
+            background-color: #f9f9f9;
+        }
+        
+        .schedule-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+        
+        .schedule-stats {
+            background-color: #e1f5fe;
+            border-radius: 5px;
+            padding: 15px;
+            margin-bottom: 20px;
+            border-left: 5px solid #03a9f4;
+        }
+        
+        .schedule-timeline {
+            position: relative;
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 2px solid #ddd;
+        }
+        
+        .timeline-hour {
+            position: absolute;
+            font-size: 12px;
+            color: #777;
+            top: -20px;
+        }
+        
+        .timeline-stop {
+            position: absolute;
+            background-color: #3498db;
+            border-radius: 5px;
+            padding: 10px;
+            color: white;
+            min-width: 200px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .timeline-stop.reinspection {
+            background-color: #ff9800;
+        }
+        
+        .timeline-stop.complaint {
+            background-color: #f44336;
+        }
+        
+        .timeline-stop.out-of-service {
+            background-color: #9c27b0;
+        }
+        
+        .timeline-stop h4 {
+            margin: 0 0 5px 0;
+            font-size: 14px;
+        }
+        
+        .timeline-stop p {
+            margin: 3px 0;
+            font-size: 12px;
+        }
+        
+        .btn {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            cursor: pointer;
+            border-radius: 4px;
+            text-decoration: none;
+            display: inline-block;
+        }
+        
+        .btn:hover {
+            background-color: #2980b9;
+        }
+        
+        /* Station tag styles */
+        .station-tag {
+            display: inline-block;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 11px;
+            margin-right: 5px;
+            font-weight: bold;
+        }
+        
+        .tag-reinspection {
+            background-color: #ff9800;
+            color: white;
+        }
+        
+        .tag-complaint {
+            background-color: #f44336;
+            color: white;
+        }
+        
+        .tag-out-of-service {
+            background-color: #9c27b0;
+            color: white;
+        }
+        
+        /* For desktop layout */
+        .schedule-list {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .schedule-item {
+            display: flex;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        
+        .time-column {
+            background-color: #3498db;
+            color: white;
+            padding: 10px;
+            width: 120px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+        }
+        
+        .time-column.reinspection {
+            background-color: #ff9800;
+        }
+        
+        .time-column.complaint {
+            background-color: #f44336;
+        }
+        
+        .time-column.out-of-service {
+            background-color: #9c27b0;
+        }
+        
+        .content-column {
+            padding: 15px;
+            flex-grow: 1;
+        }
+        
+        .station-name {
+            font-weight: bold;
+            font-size: 18px;
+            margin-bottom: 5px;
+        }
+        
+        .station-address {
+            color: #555;
+            margin-bottom: 10px;
+        }
+        
+        .station-details {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .detail-item {
+            background-color: #f0f0f0;
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 12px;
+        }
+        
+        @media print {
+            .no-print {
+                display: none;
+            }
+            
+            body {
+                font-size: 12px;
+            }
+            
+            .schedule-container {
+                border: none;
+                padding: 0;
+                margin: 0;
+            }
+            
+            .schedule-item {
+                page-break-inside: avoid;
+                margin-bottom: 10px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="no-print" style="margin-bottom: 20px;">
+        <a href="/" class="btn">← Back to Route Planner</a>
+        <button onclick="window.print()" class="btn">Print Schedule</button>
+    </div>
+
+    <h1>Daily Station Inspection Schedule</h1>
+    
+    {% if error %}
+    <div style="color: red; margin-top: 20px; margin-bottom: 20px;">
+        <h3>Error</h3>
+        <p>{{ error }}</p>
+    </div>
+    {% endif %}
+    
+    {% if route_plan %}
+    <div class="schedule-container">
+        <div class="schedule-header">
+            <h2>Today's Schedule</h2>
+            <div>
+                <span style="font-weight: bold;">Date:</span> {{ route_plan[0].date|default('Today') }}
+            </div>
+        </div>
+        
+        <div class="schedule-stats">
+            <div style="display: flex; justify-content: space-between; flex-wrap: wrap;">
+                <div>
+                    <strong>Total Stops:</strong> {{ route_plan|length - 1 }}
+                </div>
+                <div>
+                    <strong>Total Travel Time:</strong> {{ (route_plan[0].total_time/60)|round(1) }} hours
+                </div>
+                <div>
+                    <strong>Total Pumps to Inspect:</strong> {{ route_plan[0].total_pumps }}
+                </div>
+                <div>
+                    <strong>Estimated Completion Time:</strong> 
+                    {% if route_plan[-1].arrival_time %}
+                    {{ route_plan[-1].arrival_time }}
+                    {% else %}
+                    End of day
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+        
+        <div class="schedule-list">
+            {% for stop in route_plan %}
+            {% if loop.index0 > 0 %}
+            <div class="schedule-item">
+                <div class="time-column {% if stop.complaint %}complaint{% elif stop.reinspection %}reinspection{% elif stop.out_of_service %}out-of-service{% endif %}">
+                    <div>{{ stop.arrival_time|default('N/A') }}</div>
+                    <div style="font-size: 12px; margin-top: 5px;">
+                        {{ stop.travel_time|default(0)|int }} min travel
+                    </div>
+                </div>
+                <div class="content-column">
+                    <div class="station-name">
+                        {{ stop.name|default('Station ' + loop.index0|string) }}
+                        {% if stop.reinspection %}
+                        <span class="station-tag tag-reinspection">Reinspection</span>
+                        {% endif %}
+                        {% if stop.complaint %}
+                        <span class="station-tag tag-complaint">Complaint</span>
+                        {% endif %}
+                        {% if stop.out_of_service %}
+                        <span class="station-tag tag-out-of-service">Out of Service</span>
+                        {% endif %}
+                    </div>
+                    <div class="station-address">
+                        {{ stop.address|default('') }}, {{ stop.city|default('') }}, {{ stop.state|default('') }} {{ stop.zip|default('') }}
+                    </div>
+                    <div class="station-details">
+                        <div class="detail-item">
+                            <strong>Pumps to Inspect:</strong> {{ stop.pumps_to_inspect|default(2) }}
+                        </div>
+                        {% if stop.last_visited %}
+                        <div class="detail-item">
+                            <strong>Last Visited:</strong> {{ stop.last_visited }}
+                        </div>
+                        {% endif %}
+                        {% if stop.distance %}
+                        <div class="detail-item">
+                            <strong>Distance:</strong> {{ stop.distance|round(1) }} miles
+                        </div>
+                        {% endif %}
+                        {% if stop.priority_reason %}
+                        <div class="detail-item" style="background-color: #ffe0b2;">
+                            <strong>Priority:</strong> {{ stop.priority_reason }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    
+                    {% if stop.notes %}
+                    <div style="margin-top: 10px; padding: 5px; background-color: #f5f5f5; border-left: 3px solid #3498db;">
+                        <strong>Notes:</strong> {{ stop.notes }}
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+            {% endfor %}
+        </div>
+    </div>
+    {% else %}
+    <div style="text-align: center; margin-top: 50px;">
+        <h3>No schedule data available</h3>
+        <p>Please generate a route plan first</p>
+        <a href="/" class="btn">Go to Route Planner</a>
+    </div>
+    {% endif %}
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Add any JavaScript functionality here
+        });
+    </script>
+</body>
+</html>

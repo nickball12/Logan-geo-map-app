@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Station Addresses</title>
+    <style>
+        body { font-family: sans-serif; margin: 2em; }
+        .container { max-width: 1600px; margin: 0 auto; }
+        .header-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+        .navigation { display: flex; gap: 10px; }
+        .navigation a { 
+            text-decoration: none; 
+            background-color: #3498db; 
+            color: white; 
+            padding: 10px 15px; 
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        .navigation a:hover { background-color: #2980b9; }
+        
+        .refresh-button {
+            background-color: #27ae60 !important;
+        }
+        .refresh-button:hover {
+            background-color: #219955 !important;
+        }
+        .reset-button {
+            background-color: #e74c3c !important;
+        }
+        .reset-button:hover {
+            background-color: #c0392b !important;
+        }
+        
+        /* Address table styles */
+        .address-table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+        .address-table th, .address-table td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        .address-table th { background-color: #f2f2f2; position: sticky; top: 0; }
+        .address-table tr:nth-child(even) { background-color: #f9f9f9; }
+        .address-table tr:hover { background-color: #f0f0f0; }
+        
+        /* Duplicate highlighting */
+        .duplicate { background-color: #ffecb3 !important; }
+        .duplicate:hover { background-color: #ffe082 !important; }
+        
+        /* Filter and search controls */
+        .controls { margin: 20px 0; display: flex; gap: 20px; align-items: center; }
+        .search-box { 
+            padding: 8px 12px; 
+            border: 1px solid #ddd; 
+            border-radius: 4px;
+            min-width: 300px;
+        }
+        .filter-select {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        
+        /* Stats section */
+        .stats {
+            background-color: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+            border: 1px solid #ddd;
+        }
+        .stats h3 {
+            margin-top: 0;
+            color: #3498db;
+        }
+        .duplicate-count {
+            color: #e74c3c;
+            font-weight: bold;
+        }
+        
+        /* Success and error messages */
+        .success-message {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .error-message {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .status-message {
+            font-weight: bold;
+            color: #3498db;
+            margin-top: 10px;
+        }
+        
+        /* Status badges */
+        .status-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: bold;
+            color: white;
+        }
+        .status-reason {
+            font-size: 0.85em;
+            color: #666;
+            margin-left: 4px;
+        }
+        .status-badge.complaint {
+            background-color: #e74c3c;
+        }
+        .status-badge.reinspection {
+            background-color: #f39c12;
+        }
+        .status-badge.out-of-service {
+            background-color: #9b59b6;
+        }
+        .status-badge.normal {
+            background-color: #3498db;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header-container">
+            <h1>Station Addresses</h1>
+            <div class="navigation">
+                <a href="/">Back to Route Planner</a>
+                <a href="/refresh_status" class="refresh-button">Refresh Status from All Sheets</a>
+                <a href="/reset_app" class="reset-button">Reset App Data</a>
+            </div>
+        </div>
+        
+        <div class="stats">
+            <h3>Address Statistics</h3>
+            <p>Total Addresses: <strong>{{ addresses|length }}</strong></p>
+            <p>Unique Addresses: <strong>{{ unique_count }}</strong></p>
+            <p>Duplicate Addresses: <span class="duplicate-count">{{ duplicate_count }}</span></p>
+            
+            {% if status_message %}
+            <p class="status-message">{{ status_message }}</p>
+            {% endif %}
+            
+            {% if success %}
+            <div class="success-message">
+                {{ success }}
+            </div>
+            {% endif %}
+            
+            {% if error %}
+            <div class="error-message">
+                {{ error }}
+            </div>
+            {% endif %}
+        </div>
+        
+        <div class="controls">
+            <input type="text" id="searchBox" class="search-box" placeholder="Search addresses..." onkeyup="filterAddresses()">
+            
+            <select id="duplicateFilter" class="filter-select" onchange="filterAddresses()">
+                <option value="all">Show All Addresses</option>
+                <option value="duplicates">Show Only Duplicates</option>
+                <option value="unique">Show Only Unique</option>
+            </select>
+            
+            <select id="statusFilter" class="filter-select" onchange="filterAddresses()">
+                <option value="all">All Statuses</option>
+                <option value="reinspection">Reinspection</option>
+                <option value="complaint">Complaint</option>
+                <option value="out-of-service">Out of Service</option>
+                <option value="normal">Normal</option>
+            </select>
+            
+            <select id="sortBy" class="filter-select" onchange="sortAddresses()">
+                <option value="name">Sort by Name</option>
+                <option value="address">Sort by Address</option>
+                <option value="city">Sort by City</option>
+                <option value="priority">Sort by Priority</option>
+            </select>
+        </div>
+        
+        <table class="address-table" id="addressTable">
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Address</th>
+                    <th>City</th>
+                    <th>State</th>
+                    <th>ZIP</th>
+                    <th>County</th>
+                    <th>Coordinates</th>
+                    <th>Priority Score</th>
+                    <th>Last Inspection</th>
+                    <th>Days Since</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for address in addresses %}
+                <tr class="{% if address.is_duplicate %}duplicate{% endif %}" data-address="{{ address.full_address }}" data-duplicate="{{ address.is_duplicate|lower }}" data-business-id="{{ address.business_id }}">
+                    <td class="{% if editable %}editable-cell{% endif %}" data-field="name">{{ address.name }}</td>
+                    <td class="{% if editable %}editable-cell{% endif %}" data-field="address">{{ address.address }}</td>
+                    <td class="{% if editable %}editable-cell{% endif %}" data-field="city">{{ address.city }}</td>
+                    <td class="{% if editable %}editable-cell{% endif %}" data-field="state">{{ address.state }}</td>
+                    <td class="{% if editable %}editable-cell{% endif %}" data-field="zip_code">{{ address.zip_code }}</td>
+                    <td class="{% if editable %}editable-cell{% endif %}" data-field="county">{{ address.county }}</td>
+                    <td>{{ address.coordinates }}</td>
+                    <td>{{ address.priority_score }}</td>
+                    <td>{{ address.last_inspection_date }}</td>
+                    <td>{{ address.days_since_inspection }}</td>
+                    <td>
+                        <div class="status-container">
+                            {% if address.has_complaint %}
+                                <span class="status-badge complaint">Complaint</span>
+                            {% endif %}
+                            {% if address.needs_reinspection %}
+                                <span class="status-badge reinspection">Reinspection</span>
+                                {% if address.reinspection_reason %}
+                                    <span class="status-reason">({{ address.reinspection_reason }})</span>
+                                {% endif %}
+                            {% endif %}
+                            {% if address.out_of_service_pumps > 0 %}
+                                <span class="status-badge out-of-service">Out of Service ({{ address.out_of_service_pumps }})</span>
+                                {% if address.out_of_service_details %}
+                                    <span class="status-reason">({{ address.out_of_service_details }})</span>
+                                {% endif %}
+                            {% endif %}
+                            {% if not address.has_complaint and not address.needs_reinspection and address.out_of_service_pumps == 0 %}
+                                <span class="status-badge normal">Normal</span>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    
+    <script>
+        function filterAddresses() {
+            const searchText = document.getElementById('searchBox').value.toLowerCase();
+            const duplicateFilter = document.getElementById('duplicateFilter').value;
+            const statusFilter = document.getElementById('statusFilter').value;
+            const rows = document.querySelectorAll('#addressTable tbody tr');
+            
+            rows.forEach(row => {
+                const addressText = row.textContent.toLowerCase();
+                const isDuplicate = row.getAttribute('data-duplicate') === 'true';
+                
+                // Check if row contains the search text
+                let showRow = addressText.includes(searchText);
+                
+                // Apply duplicate filter
+                if (duplicateFilter === 'duplicates' && !isDuplicate) {
+                    showRow = false;
+                } else if (duplicateFilter === 'unique' && isDuplicate) {
+                    showRow = false;
+                }
+                
+                // Apply status filter
+                if (statusFilter !== 'all') {
+                    const statusCell = row.querySelector('.status-container');
+                    if (statusCell) {
+                        const hasStatusClass = statusCell.querySelector(`.status-badge.${statusFilter}`);
+                        if (!hasStatusClass) {
+                            showRow = false;
+                        }
+                    }
+                }
+                
+                row.style.display = showRow ? '' : 'none';
+            });
+        }
+        
+        function sortAddresses() {
+            const sortBy = document.getElementById('sortBy').value;
+            const table = document.getElementById('addressTable');
+            const tbody = table.querySelector('tbody');
+            const rows = Array.from(tbody.querySelectorAll('tr'));
+            
+            // Determine column index based on sortBy value
+            let columnIndex;
+            switch(sortBy) {
+                case 'name': columnIndex = 0; break;
+                case 'address': columnIndex = 1; break;
+                case 'city': columnIndex = 2; break;
+                case 'priority': columnIndex = 7; break;
+                default: columnIndex = 0;
+            }
+            
+            // Sort the rows
+            rows.sort((a, b) => {
+                const aValue = a.cells[columnIndex].textContent.trim();
+                const bValue = b.cells[columnIndex].textContent.trim();
+                
+                // If sorting by priority (numeric)
+                if (sortBy === 'priority') {
+                    return parseFloat(bValue) - parseFloat(aValue); // Descending
+                }
+                
+                // Otherwise sort alphabetically
+                return aValue.localeCompare(bValue);
+            });
+            
+            // Reorder rows in the table
+            rows.forEach(row => tbody.appendChild(row));
+        }
+        
+        {% if editable %}
+        // Make cells editable when clicked
+        document.addEventListener('DOMContentLoaded', function() {
+            const editableCells = document.querySelectorAll('.editable-cell');
+            
+            editableCells.forEach(cell => {
+                cell.addEventListener('click', function() {
+                    if (!this.classList.contains('editing')) {
+                        const currentValue = this.textContent.trim();
+                        const field = this.dataset.field;
+                        const businessId = this.closest('tr').dataset.businessId;
+                        
+                        // Create input element
+                        const input = document.createElement('input');
+                        input.type = 'text';
+                        input.value = currentValue;
+                        input.style.width = '90%';
+                        
+                        // Clear the cell and add the input
+                        this.textContent = '';
+                        this.appendChild(input);
+                        this.classList.add('editing');
+                        
+                        // Focus the input
+                        input.focus();
+                        
+                        // Handle saving on blur
+                        input.addEventListener('blur', function() {
+                            saveChange(businessId, field, this.value, cell);
+                        });
+                        
+                        // Handle Enter key
+                        input.addEventListener('keydown', function(e) {
+                            if (e.key === 'Enter') {
+                                saveChange(businessId, field, this.value, cell);
+                            }
+                        });
+                    }
+                });
+            });
+            
+            // Function to save changes
+            function saveChange(businessId, field, value, cell) {
+                // Show loading indicator
+                const originalContent = cell.innerHTML;
+                cell.innerHTML = '<span class="saving">Saving...</span>';
+                
+                // Send update to server
+                fetch('/update_station', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        business_id: businessId,
+                        field: field,
+                        value: value
+                    })
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        // Update the cell with the new value
+                        cell.textContent = value;
+                        cell.classList.remove('editing');
+                        
+                        // Add a temporary highlight
+                        cell.classList.add('updated');
+                        setTimeout(() => {
+                            cell.classList.remove('updated');
+                        }, 2000);
+                    } else {
+                        // Show error and revert
+                        alert('Error saving change: ' + (data.error || 'Unknown error'));
+                        cell.innerHTML = originalContent;
+                        cell.classList.remove('editing');
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('Error saving change: ' + error);
+                    cell.innerHTML = originalContent;
+                    cell.classList.remove('editing');
+                });
+            }
+        });
+        {% endif %}
+    </script>
+    
+    <style>
+        /* Editable cell styles */
+        .editable-cell {
+            cursor: pointer;
+        }
+        .editable-cell:hover {
+            background-color: #f0f0f0;
+        }
+        .editable-cell.editing {
+            padding: 0;
+        }
+        .editable-cell.updated {
+            background-color: #d4edda;
+            transition: background-color 1s;
+        }
+        .saving {
+            color: #856404;
+            background-color: #fff3cd;
+            padding: 2px 5px;
+            border-radius: 3px;
+            font-style: italic;
+        }
+    </style>
+</body>
+</html>

@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Reset Application Data - Confirmation</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .header-container {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 10px;
+        }
+        h1 {
+            color: #3498db;
+            margin-top: 0;
+        }
+        .warning {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeeba;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .button-container {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 30px;
+        }
+        .back-button {
+            background-color: #6c757d;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-block;
+        }
+        .reset-button {
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            padding: 10px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .data-list {
+            background-color: #f8f9fa;
+            border-left: 4px solid #6c757d;
+            padding: 10px 15px;
+            margin-bottom: 15px;
+        }
+        .data-list h3 {
+            margin-top: 0;
+            color: #495057;
+        }
+        .data-list ul {
+            margin-bottom: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header-container">
+            <h1>Reset Application Data</h1>
+        </div>
+        
+        <div class="warning">
+            <strong>Warning!</strong> This action will permanently delete all uploaded files, cached data, saved routes, and station data. This action cannot be undone.
+        </div>
+        
+        <p>The following data will be cleared:</p>
+        
+        <div class="data-list">
+            <h3>Uploaded Files</h3>
+            <ul>
+                <li>All Excel files in the uploads directory</li>
+            </ul>
+        </div>
+        
+        <div class="data-list">
+            <h3>Cached Data</h3>
+            <ul>
+                <li>Geocoding cache</li>
+                <li>Travel time calculations</li>
+                <li>Other temporary data</li>
+            </ul>
+        </div>
+        
+        <div class="data-list">
+            <h3>Saved Routes</h3>
+            <ul>
+                <li>All route plans in the output directory</li>
+            </ul>
+        </div>
+        
+        <div class="data-list">
+            <h3>Station Data</h3>
+            <ul>
+                <li>Saved station information</li>
+                <li>Status and priority data</li>
+                <li>Custom edits to station data</li>
+            </ul>
+        </div>
+        
+        <form method="post" action="{{ url_for('reset_app') }}">
+            <div class="button-container">
+                <a href="{{ url_for('index') }}" class="back-button">Cancel</a>
+                <button type="submit" name="confirm" value="yes" class="reset-button">Reset All Data</button>
+            </div>
+        </form>
+    </div>
+</body>
+</html>

@@ -1,0 +1,748 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Station Route Planner</title>
+    <style>
+        body { font-family: sans-serif; margin: 2em; }
+        .route-plan { border-collapse: collapse; width: 100%; }
+        .route-plan th, .route-plan td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        .route-plan th { background-color: #f2f2f2; }
+        .route-plan tr:nth-child(even) { background-color: #f9f9f9; }
+        .route-plan tr:hover { background-color: #f0f0f0; }
+        .form-group { margin-bottom: 1em; }
+        label { display: inline-block; width: 200px; }
+        .file-format-hint { color: #666; font-size: 0.9em; margin-top: 0.3em; }
+        
+        /* Route summary styles */
+        .route-summary {
+            margin-bottom: 20px;
+            background-color: #f5f5f5;
+            padding: 15px;
+            border-radius: 5px;
+            border: 1px solid #ddd;
+        }
+        .route-summary h3 {
+            margin-top: 0;
+            color: #3498db;
+        }
+        .route-summary ol {
+            padding-left: 20px;
+        }
+        .route-summary li {
+            margin-bottom: 5px;
+        }
+        .route-summary .total-stops {
+            margin-top: 10px;
+            font-weight: bold;
+        }
+        
+        /* Section divider */
+        .section-divider {
+            border-top: 1px solid #ddd;
+            margin: 30px 0;
+        }
+        
+        /* Styles for route descriptions */
+        .route-description {
+            margin-top: 10px;
+            margin-bottom: 15px;
+        }
+        
+        /* Styles for saved routes section */
+        .saved-routes-container {
+            border: 1px solid #3498db;
+            border-radius: 8px;
+            margin: 20px 0;
+            background-color: #f0f8ff;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            border-image: linear-gradient(to right, #3498db, #2980b9) 1;
+        }
+        
+        .saved-routes-header {
+            background-color: #3498db;
+            color: white;
+            padding: 10px 15px;
+            border-top-left-radius: 7px;
+            border-top-right-radius: 7px;
+        }
+        
+        .saved-routes-header h3 {
+            margin: 0;
+            font-size: 18px;
+        }
+        
+        .saved-routes-content {
+            padding: 15px;
+        }
+        
+        .button-group {
+            margin-top: 15px;
+            display: flex;
+            gap: 10px;
+        }
+        
+        .btn {
+            background-color: #3498db;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        
+        .btn:hover {
+            background-color: #2980b9;
+        }
+        
+        /* Pulsing animation for progress updates */
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .pulsing {
+            animation: pulse 1.5s infinite;
+            font-weight: bold;
+            color: #ff6600;
+        }
+        
+        /* Loading spinner and progress bar styles */
+        #loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+        
+        .spinner {
+            border: 8px solid #f3f3f3;
+            border-top: 8px solid #3498db;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 2s linear infinite;
+            margin-bottom: 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .progress-container {
+            width: 80%;
+            max-width: 500px;
+            background-color: #f3f3f3;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        
+        .progress-bar {
+            width: 0%;
+            height: 30px;
+            background-color: #4CAF50;
+            border-radius: 5px;
+            text-align: center;
+            line-height: 30px;
+            color: white;
+        }
+        
+        .progress-text {
+            color: white;
+            font-size: 16px;
+            margin-bottom: 10px;
+        }
+        
+        #phase-indicator {
+            font-size: 20px;
+            font-weight: bold;
+            color: #3498db;
+            margin-bottom: 15px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
+        }
+        
+        /* Cancel button styles */
+        .cancel-button {
+            background-color: #e74c3c;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin-top: 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.3s;
+        }
+        
+        .cancel-button:hover {
+            background-color: #c0392b;
+        }
+        
+        .cancel-button:active {
+            transform: scale(0.98);
+        }
+    </style>
+</head>
+<body>
+    <h1>Station Route Planner</h1>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay">
+        <div class="spinner"></div>
+        <div id="phase-indicator" class="progress-text">Initializing...</div>
+        <div class="progress-container">
+            <div id="progress-bar" class="progress-bar">0%</div>
+        </div>
+        <div id="progress-detail" class="progress-text">Getting ready...</div>
+        <button id="cancel-button" class="cancel-button">Cancel Processing</button>
+    </div>
+
+    <form method="post" enctype="multipart/form-data" id="route-form">
+        <div class="form-group">
+            <label for="hours">Hours to work:</label>
+            <input type="number" id="hours" name="hours" step="0.1" value="8" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="time_between_stops">Time between stops (min):</label>
+            <input type="number" id="time_between_stops" name="time_between_stops" step="1" value="0" min="0" required>
+            <div class="file-format-hint">Additional time to add between stops (e.g., for breaks, setup, or travel buffer)</div>
+        </div>
+        
+        <div class="form-group">
+            <label for="address_col">Address Column:</label>
+            <input type="text" id="address_col" name="address_col" value="S" required>
+            <div class="file-format-hint">For CSV: Use number (0, 1, 2...). For Excel: Use letter (A, B, C...)</div>
+        </div>
+        
+        <div class="form-group">
+            <label for="city_col">City Column:</label>
+            <input type="text" id="city_col" name="city_col" value="T" required>
+            <div class="file-format-hint">For CSV: Use number (0, 1, 2...). For Excel: Use letter (A, B, C...)</div>
+        </div>
+        
+        <div class="form-group">
+            <label for="state_col">State Column (optional):</label>
+            <input type="text" id="state_col" name="state_col" value="U" placeholder="e.g., 20 or U">
+            <div class="file-format-hint">For CSV: Use number (0, 1, 2...). For Excel: Use letter (A, B, C...)</div>
+        </div>
+        
+        <div class="form-group">
+            <label for="zip_col">ZIP Code Column (optional):</label>
+            <input type="text" id="zip_col" name="zip_col" value="V" placeholder="e.g., 21 or V">
+            <div class="file-format-hint">For CSV: Use number (0, 1, 2...). For Excel: Use letter (A, B, C...)</div>
+        </div>
+        
+        <div class="form-group">
+            <label for="last_visited_col">Last Visited Date Column (optional):</label>
+            <input type="text" id="last_visited_col" name="last_visited_col" value="" placeholder="e.g., 22 or W">
+            <div class="file-format-hint">Column with dates of last visit. Older dates will be prioritized. For CSV: Use number (0, 1, 2...). For Excel: Use letter (A, B, C...)</div>
+        </div>
+        
+        <div class="form-group">
+            <label for="pumps_col">Pumps Per Station Column (optional):</label>
+            <input type="text" id="pumps_col" name="pumps_col" value="" placeholder="e.g., 23 or X">
+            <div class="file-format-hint">Column containing the number of pumps at each station. For CSV: Use number (0, 1, 2...). For Excel: Use letter (A, B, C...)</div>
+        </div>
+        
+        <div class="form-group">
+            <label for="pumps_per_station">Pumps to Inspect Per Station:</label>
+            <input type="number" id="pumps_per_station" name="pumps_per_station" value="2" min="1" max="10" step="1" required>
+            <div class="file-format-hint">Number of pumps you want to inspect at each station (defaults to 2)</div>
+        </div>
+        
+        <div class="form-group">
+            <label for="max_pumps_per_day">Maximum Pumps Per Day:</label>
+            <input type="number" id="max_pumps_per_day" name="max_pumps_per_day" value="20" min="1" max="100" step="1" required>
+            <div class="file-format-hint">Maximum total number of pumps you want to inspect in a day</div>
+        </div>
+        
+        <div class="form-group">
+            <label for="skip_rows">Skip Rows:</label>
+            <input type="number" id="skip_rows" name="skip_rows" value="5" required>
+        </div>
+        
+        <div class="form-group">
+            <label for="sheet_name">Excel Sheet Name/Index:</label>
+            <input type="text" id="sheet_name" name="sheet_name" value="3" placeholder="0 or Sheet1">
+            <div class="file-format-hint">For Excel only: sheet index (0, 1, 2...) or name ('Sheet1')</div>
+        </div>
+        
+        <div class="form-group">
+            <label for="use_cache">Use cached geocoding results:</label>
+            <input type="checkbox" id="use_cache" name="use_cache" value="1" checked>
+            <div class="file-format-hint">Use previously cached geocoding results for faster processing</div>
+        </div>
+        
+        <div class="form-group">
+            <label for="max_routes">Maximum Routes to Calculate:</label>
+            <input type="number" id="max_routes" name="max_routes" value="500" min="100" max="10000" step="100" required>
+            <div class="file-format-hint">Limit the number of routes to calculate for better performance (500-1000 recommended)</div>
+        </div>
+        
+        <div class="form-group optimization-info" style="border: 1px solid #ddd; padding: 10px; background-color: #f9f9f9; margin-bottom: 15px; border-radius: 5px;">
+            <h3 style="margin-top: 0;">Route Optimization</h3>
+            <p>The system intelligently prioritizes routes based on:</p>
+            <ol>
+                <li><strong>Last Visited Date:</strong> Locations that haven't been visited recently are prioritized first</li>
+                <li><strong>Pump Limits:</strong> Routes respect the per-station and daily maximum pump inspection limits</li>
+                <li><strong>Same City:</strong> Locations in the same city are prioritized next</li>
+                <li><strong>Same ZIP Code:</strong> Locations sharing a ZIP code are then prioritized</li>
+                <li><strong>Same Road:</strong> Locations on the same road (especially in Utah's grid system) are prioritized</li>
+                <li><strong>Proximity:</strong> Remaining locations are prioritized by straight-line distance</li>
+            </ol>
+            <p>This approach ensures efficient routing while significantly reducing calculation time.</p>
+        </div>
+        
+        <div class="form-group">
+            <label for="file_name">Or enter file name (CSV/Excel):</label>
+            <input type="text" id="file_name" name="file_name" placeholder="your_station_data.xlsx">
+        </div>
+        
+        <div class="form-group">
+            <label for="file">Or upload file:</label>
+            <input type="file" id="file" name="file" accept=".csv,.xlsx">
+        </div>
+        
+        <button type="submit">Generate Route</button>
+    </form>
+
+    {% if status %}
+        <p style="color: green;">{{ status }}</p>
+    {% endif %}
+    {% if error %}
+        <p style="color: red;">{{ error }}</p>
+    {% endif %}
+    
+    <!-- Button to view the latest saved route -->
+    <div style="margin: 20px 0;">
+        <button id="view-latest-route-btn" onclick="viewSavedRoute()" style="padding: 10px 15px; background-color: #3498db; color: white; border: none; border-radius: 5px; cursor: pointer;">
+            View Latest Saved Route
+        </button>
+    </div>
+
+    {% if route_plan %}
+        <div class="section-divider"></div>
+        <h2>Optimized Route</h2>
+        
+        <!-- Simple list view of stops -->
+        <div class="route-summary">
+            <h3>Route Summary</h3>
+            {% if skipped_info %}
+            <div style="background-color: #fff8e1; padding: 10px; border-radius: 5px; margin-bottom: 15px; border-left: 4px solid #ffc107;">
+                <h4 style="margin-top: 0; color: #ff6f00;">Partial Route Notice</h4>
+                <p>Due to time constraints, only <strong>{{ skipped_info.included }}</strong> out of <strong>{{ skipped_info.total }}</strong> stops could be included ({{ skipped_info.skipped_percentage }}% skipped).</p>
+                <p>To include more stops, try increasing the work hours or adjusting inspection times.</p>
+            </div>
+            {% endif %}
+            <p>Starting from: <strong>{{ route_plan[0]['Name'] }}</strong> ({{ route_plan[0]['Full Address'] }})</p>
+            {% if time_between_stops > 0 %}
+            <p>Time between stops: <strong>{{ time_between_stops }} minutes</strong></p>
+            {% endif %}
+            <ol>
+                {% for stop in route_plan[1:] %}
+                    <li><strong>{{ stop['Name'] }}</strong> - {{ stop['Full Address'] }}
+                        {% if 'Pumps to Inspect' in stop and stop['Pumps to Inspect'] is not none %}
+                        <span style="color: #3498db;">({{ stop['Pumps to Inspect'] | int }} pumps to inspect
+                        {% if 'Total Pumps' in stop and stop['Total Pumps'] is not none %}
+                        of {{ stop['Total Pumps'] | int }} total
+                        {% endif %})</span>
+                        {% endif %}
+                    </li>
+                {% endfor %}
+            </ol>
+            <p class="total-stops">Total stops: <strong>{{ route_plan|length }}</strong></p>
+            {% if route_plan[0] is defined and 'Pumps to Inspect' in route_plan[0] %}
+            {% set total_pumps = 0 %}
+            {% for stop in route_plan %}
+                {% if 'Pumps to Inspect' in stop and stop['Pumps to Inspect'] is not none %}
+                    {% set total_pumps = total_pumps + stop['Pumps to Inspect']|int %}
+                {% endif %}
+            {% endfor %}
+            <p class="total-stops">Total pumps to inspect: <strong>{{ total_pumps }}</strong></p>
+            {% endif %}
+            
+            <!-- Export options -->
+            <div style="margin-top: 15px;">
+                <button id="copy-route-btn" onclick="copyRouteToClipboard()" style="margin-right: 10px;">Copy Route to Clipboard</button>
+                <button id="print-route-btn" onclick="window.print()" style="margin-right: 10px;">Print Route</button>
+                <button id="view-saved-route-btn" onclick="viewSavedRoute()">View Saved Route</button>
+            </div>
+        </div>
+        
+        <!-- Detailed table view -->
+        <h3>Detailed Route Plan</h3>
+        <table class="route-plan">
+            <tr>
+                <th>Stop</th>
+                <th>Name</th>
+                <th>Address</th>
+                <th>Inspection Time (min)</th>
+                <th>Last Visited</th>
+                <th>Days Since Visit</th>
+                <th>Pumps to Inspect</th>
+                <th>Total Pumps</th>
+            </tr>
+            {% for stop in route_plan %}
+                <tr>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ stop['Name'] }}</td>
+                    <td>{{ stop['Full Address'] }}</td>
+                    <td>{{ stop['Inspection Time (min)'] | int }}</td>
+                    <td>{{ stop['Last Visited'] if 'Last Visited' in stop else 'N/A' }}</td>
+                    <td>{{ stop['Days Since Visit'] | int if 'Days Since Visit' in stop else 'N/A' }}</td>
+                    <td>{{ stop['Pumps to Inspect'] | int if 'Pumps to Inspect' in stop and stop['Pumps to Inspect'] is not none else 'N/A' }}</td>
+                    <td>{{ stop['Total Pumps'] | int if 'Total Pumps' in stop and stop['Total Pumps'] is not none else 'N/A' }}</td>
+                </tr>
+            {% endfor %}
+        </table>
+    {% endif %}
+    
+    {% if geocoded_addresses %}
+        <div class="section-divider"></div>
+        <h2>Geocoded Addresses</h2>
+        <p>Addresses with default coordinates (40.7608, -111.8910) could not be geocoded properly.</p>
+        <table class="route-plan">
+            <tr>
+                <th>#</th>
+                <th>Name</th>
+                <th>Address</th>
+                <th>Coordinates</th>
+                <th>Status</th>
+            </tr>
+            {% for address in geocoded_addresses %}
+                <tr {% if address.Is_Default %}style="background-color: #ffdddd;"{% endif %}>
+                    <td>{{ loop.index }}</td>
+                    <td>{{ address.Name }}</td>
+                    <td>{{ address.Address }}</td>
+                    <td>{{ address.Coordinates }}</td>
+                    <td>{% if address.Is_Default %}Default coordinates{% else %}Geocoded successfully{% endif %}</td>
+                </tr>
+            {% endfor %}
+        </table>
+    {% endif %}
+    
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            const form = document.getElementById('route-form');
+            const loadingOverlay = document.getElementById('loading-overlay');
+            const progressBar = document.getElementById('progress-bar');
+            const progressDetail = document.getElementById('progress-detail');
+            const phaseIndicator = document.getElementById('phase-indicator');
+            const cancelButton = document.getElementById('cancel-button');
+            
+            let processing = false;
+            let eventSource = null;
+            
+            form.addEventListener('submit', function(e) {
+                e.preventDefault(); // Prevent the default form submission
+                processing = true;
+                loadingOverlay.style.display = 'flex';
+                
+                // Submit the form data using fetch
+                const formData = new FormData(form);
+                
+                fetch('/', {
+                    method: 'POST',
+                    body: formData
+                }).then(response => {
+                    if (response.redirected) {
+                        window.location.href = response.url;
+                    } else {
+                        return response.text().then(html => {
+                            document.open();
+                            document.write(html);
+                            document.close();
+                        });
+                    }
+                }).catch(error => {
+                    console.error('Error submitting form:', error);
+                    resetUI();
+                });
+                
+                // Set up event source for server-sent events
+                setupEventSource();
+            });
+            
+            // Handle cancel button click
+            cancelButton.addEventListener('click', function() {
+                if (processing) {
+                    // Send cancellation request to server
+                    fetch('/cancel', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        }
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'cancelling') {
+                            phaseIndicator.textContent = 'Cancelling...';
+                            progressDetail.textContent = 'Stopping current operation...';
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error cancelling process:', error);
+                        resetUI();
+                    });
+                }
+            });
+            
+            function setupEventSource() {
+                // Close any existing event source
+                if (eventSource) {
+                    eventSource.close();
+                }
+                
+                // Set up a new event source
+                eventSource = new EventSource("/progress");
+                
+                eventSource.onmessage = function(event) {
+                    const data = JSON.parse(event.data);
+                    console.log("Progress update received:", data);  // Debug log
+                    
+                    // Update phase information if available
+                    if (data.phase_name) {
+                        phaseIndicator.textContent = data.phase_name;
+                    }
+                    
+                    if (data.total > 0) {
+                        const percent = Math.round((data.current / data.total) * 100);
+                        progressBar.style.width = percent + '%';
+                        progressBar.textContent = percent + '%';
+                        
+                        // Display appropriate progress detail based on the phase
+                        switch(data.phase) {
+                            case 'data':
+                                progressDetail.textContent = `Reading and cleaning data: ${data.address}`;
+                                break;
+                            case 'geocoding':
+                                progressDetail.textContent = `Geocoding ${data.current} of ${data.total}: ${data.address}`;
+                                break;
+                            case 'routing':
+                                progressDetail.textContent = `Calculating routes: ${data.address}`;
+                                break;
+                            case 'solving':
+                                // Special handling for the solving phase
+                                progressDetail.textContent = data.address;
+                                // Add a spinner animation or pulsing effect to indicate it's still working
+                                if (!progressDetail.classList.contains('pulsing')) {
+                                    progressDetail.classList.add('pulsing');
+                                }
+                                break;
+                            default:
+                                progressDetail.textContent = data.address;
+                        }
+                        
+                        // Make sure the loading overlay is visible
+                        loadingOverlay.style.display = 'flex';
+                    }
+                    
+                    // Process completed successfully
+                    if (data.done) {
+                        console.log("Process complete, closing SSE connection");
+                        // Remove any special effects
+                        progressDetail.classList.remove('pulsing');
+                        closeEventSource();
+                    }
+                    
+                    // Process was cancelled
+                    if (data.cancelled) {
+                        console.log("Process cancelled, closing SSE connection");
+                        progressDetail.classList.remove('pulsing');
+                        closeEventSource();
+                        resetUI();
+                        alert('Processing cancelled by user');
+                    }
+                };
+                
+                eventSource.onerror = function() {
+                    // If connection fails, close the connection
+                    closeEventSource();
+                };
+            }
+            
+            function closeEventSource() {
+                if (eventSource) {
+                    eventSource.close();
+                    eventSource = null;
+                }
+                processing = false;
+            }
+            
+            function resetUI() {
+                loadingOverlay.style.display = 'none';
+                progressBar.style.width = '0%';
+                progressBar.textContent = '0%';
+                progressDetail.textContent = 'Getting ready...';
+                progressDetail.classList.remove('pulsing');
+                phaseIndicator.textContent = 'Initializing...';
+                processing = false;
+            }
+        });
+        
+        // Function to copy route to clipboard
+        function copyRouteToClipboard() {
+            {% if route_plan %}
+            // Create a text representation of the route
+            let routeText = "OPTIMIZED ROUTE:\n\n";
+            
+            {% if skipped_info %}
+            routeText += "PARTIAL ROUTE NOTICE: Due to time constraints, only {{ skipped_info.included }} out of {{ skipped_info.total }} stops could be included ({{ skipped_info.skipped_percentage }}% skipped).\n\n";
+            {% endif %}
+            
+            routeText += "Starting from: {{ route_plan[0]['Name'] }} ({{ route_plan[0]['Full Address'] }})\n\n";
+            
+            {% for stop in route_plan[1:] %}
+            routeText += "{{ loop.index }}. {{ stop['Name'] }} - {{ stop['Full Address'] }}\n";
+            {% endfor %}
+            
+            routeText += "\nTotal stops: {{ route_plan|length }}";
+            
+            // Copy to clipboard
+            navigator.clipboard.writeText(routeText).then(function() {
+                // Visual feedback that copy worked
+                const copyBtn = document.getElementById('copy-route-btn');
+                const originalText = copyBtn.textContent;
+                copyBtn.textContent = "Copied!";
+                setTimeout(function() {
+                    copyBtn.textContent = originalText;
+                }, 2000);
+            }).catch(function(err) {
+                console.error('Failed to copy: ', err);
+                alert("Failed to copy to clipboard. Please try again.");
+            });
+            {% endif %}
+        }
+        
+        // Function to view saved route
+        function viewSavedRoute() {
+            console.log("Attempting to view saved route...");
+            
+            // Show loading indicator
+            const loadingIndicator = document.createElement('div');
+            loadingIndicator.innerHTML = '<div style="position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:rgba(0,0,0,0.8);color:white;padding:15px;border-radius:5px;">Loading route data...</div>';
+            document.body.appendChild(loadingIndicator);
+            
+            fetch('/view_saved_route')
+                .then(response => {
+                    console.log("Response status:", response.status);
+                    // Remove loading indicator
+                    document.body.removeChild(loadingIndicator);
+                    
+                    if (!response.ok) {
+                        return response.json().then(data => {
+                            throw new Error(data.error || 'No saved route found');
+                        });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    console.log("Route data received:", data);
+                    
+                    // Verify data structure
+                    if (!data.route_plan || !Array.isArray(data.route_plan) || data.route_plan.length === 0) {
+                        throw new Error('Route data is invalid or empty');
+                    }
+                    
+                    // Display route data in a modal
+                    showRouteModal(data);
+                })
+                .catch(error => {
+                    console.error('Error viewing route:', error);
+                    alert('Error viewing route: ' + error.message);
+                });
+        }
+        
+        // Function to display route data in a modal
+        function showRouteModal(routeData) {
+            try {
+                console.log("Creating modal with route data:", routeData);
+                
+                // Create modal elements
+                const modalOverlay = document.createElement('div');
+                modalOverlay.className = 'modal-overlay';
+                modalOverlay.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:1000;display:flex;justify-content:center;align-items:center;';
+                
+                const modalContent = document.createElement('div');
+                modalContent.className = 'modal-content';
+                modalContent.style.cssText = 'background:white;padding:20px;border-radius:5px;width:80%;max-width:800px;max-height:80vh;overflow-y:auto;position:relative;';
+                
+                const closeButton = document.createElement('button');
+                closeButton.innerHTML = '&times;';
+                closeButton.style.cssText = 'position:absolute;top:10px;right:15px;font-size:24px;background:none;border:none;cursor:pointer;';
+                closeButton.onclick = function() {
+                    document.body.removeChild(modalOverlay);
+                };
+                
+                // Create route content
+                const title = document.createElement('h2');
+                title.textContent = 'Saved Route Plan';
+                
+                const timestamp = document.createElement('p');
+                timestamp.innerHTML = `<strong>Generated:</strong> ${routeData.generated_at}`;
+                
+                const stopsInfo = document.createElement('p');
+                stopsInfo.innerHTML = `<strong>Stops:</strong> ${routeData.stops_count} out of ${routeData.total_stops} (${routeData.skipped_percentage}% skipped)`;
+                
+                const timeInfo = document.createElement('p');
+                timeInfo.innerHTML = `<strong>Total time:</strong> ${routeData.total_time_minutes} minutes`;
+                
+                const timeBetweenStopsInfo = document.createElement('p');
+                timeBetweenStopsInfo.innerHTML = `<strong>Time between stops:</strong> ${routeData.time_between_stops || 0} minutes`;
+                
+                // Create route list
+                const routeList = document.createElement('ol');
+                
+                if (routeData.route_plan && Array.isArray(routeData.route_plan)) {
+                    routeData.route_plan.forEach(stop => {
+                        const li = document.createElement('li');
+                        let stopInfo = `<strong>${stop.Name}</strong> - ${stop['Full Address']}`;
+                        
+                        // Add last visited date info if available
+                        if (stop['Last Visited'] && stop['Last Visited'] !== "NaT") {
+                            const lastVisitDate = new Date(stop['Last Visited']);
+                            const formatDate = lastVisitDate.toLocaleDateString();
+                            stopInfo += ` (Last visited: ${formatDate})`;
+                        }
+                        
+                        li.innerHTML = stopInfo;
+                        routeList.appendChild(li);
+                    });
+                } else {
+                    console.error("route_plan is not an array:", routeData.route_plan);
+                    const li = document.createElement('li');
+                    li.innerHTML = `<strong>Error:</strong> Could not display route plan data`;
+                    routeList.appendChild(li);
+                }
+                
+                // Add all elements to modal
+                modalContent.appendChild(closeButton);
+                modalContent.appendChild(title);
+                modalContent.appendChild(timestamp);
+                modalContent.appendChild(stopsInfo);
+                modalContent.appendChild(timeInfo);
+                modalContent.appendChild(timeBetweenStopsInfo);
+                modalContent.appendChild(document.createElement('hr'));
+                modalContent.appendChild(routeList);
+                
+                modalOverlay.appendChild(modalContent);
+                document.body.appendChild(modalOverlay);
+            } catch (error) {
+                console.error("Error displaying modal:", error);
+                alert("Error displaying route data: " + error.message);
+            }
+        }
+    </script>
+</body>
+</html>
