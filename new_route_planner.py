@@ -1,9 +1,5 @@
 import pandas as pd
-import numpy# Main entry point for route planning - all other route planning functions should call this
-def plan_optimal_route(excel_file, hours=8, max_stations=None, max_pumps=20, time_between_stops=0,
-                       progress_callback=None, cancellation_event=None, use_cache=True,
-                       include_normal=True, include_complaints=True, include_reinspections=True,
-                       include_out_of_service=True):np
+import numpy as np
 from datetime import datetime
 import time
 from geopy.distance import geodesic
@@ -16,6 +12,11 @@ from station_model import Station
 from station_manager import StationManager
 import logging
 import pickle
+import re
+import sys
+import threading
+import io
+import contextlib
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, 
@@ -33,31 +34,6 @@ STARTING_LOCATION = {
 # Geocoding cache to store previously geocoded addresses
 GEOCODE_CACHE_FILE = 'cache/geocode_cache.pkl'
 geocode_cache = {}
-
-def plan_optimal_route(excel_file, hours=8, max_stations=None, max_pumps=20, time_between_stops=10, 
-                      progress_callback=None, cancellation_event=None, use_cache=True,
-                      include_normal=True, include_complaints=True, include_reinspections=True,
-                      include_out_of_service=True):
-    """
-    Plan an optimal route for station inspections.
-    
-    Args:
-        excel_file (str): Path to Excel file with station data
-        hours (float): Number of hours available for inspections
-        max_stations (int, optional): Maximum number of stations to include
-        max_pumps (int): Maximum number of pumps to inspect in a day
-        time_between_stops (int): Additional time to add between stops
-        progress_callback (function, optional): Callback for progress updates
-        cancellation_event (Event, optional): Event to signal cancellation
-        use_cache (bool): Whether to use cached geocoding results
-        include_normal (bool): Include stations with no special flags
-        include_complaints (bool): Include stations with complaints
-        include_reinspections (bool): Include stations needing reinspection
-        include_out_of_service (bool): Include stations with out-of-service pumps
-        
-    Returns:
-        List of dictionaries with route plan
-    """
 
 # Load geocoding cache from file if it exists
 try:
@@ -507,21 +483,21 @@ def solve_route(data, progress_callback=None, cancellation_event=None, max_pumps
             progress_callback(3, 5, "Operation cancelled", True, 'solving', 'Route Optimization Cancelled', True)
         return None, None, None
 
-    # Set up search parameters
+    # Set up search parameters for much faster optimization
     search_parameters = pywrapcp.DefaultRoutingSearchParameters()
-    # Use PATH_CHEAPEST_ARC for a more reliable initial solution
-    search_parameters.first_solution_strategy = (routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC)
+    # Use AUTOMATIC to let OR-Tools choose the best strategy quickly
+    search_parameters.first_solution_strategy = (routing_enums_pb2.FirstSolutionStrategy.AUTOMATIC)
     
-    # Improve local search to find better solutions
+    # Use faster local search
     search_parameters.local_search_metaheuristic = (
-        routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH)
+        routing_enums_pb2.LocalSearchMetaheuristic.GREEDY_DESCENT)
     
-    # Add time limit to prevent getting stuck for too long
-    search_parameters.time_limit.seconds = 180  # 3 minutes is typically sufficient
+    # Much shorter time limit to prevent web timeouts
+    search_parameters.time_limit.seconds = 60  # Just 1 minute for web responsiveness
     
-    # Try harder to find a feasible solution
-    search_parameters.log_search = True  # Enable logging for debugging
-    search_parameters.solution_limit = 300  # Try to find up to 300 solutions
+    # Reduce iterations significantly for speed
+    search_parameters.log_search = False  # Disable logging for speed
+    search_parameters.solution_limit = 20  # Much lower limit for quick results
 
     # Use standard propagation for better compatibility
     search_parameters.guided_local_search_lambda_coefficient = 0.1  # Less aggressive local search
@@ -535,8 +511,54 @@ def solve_route(data, progress_callback=None, cancellation_event=None, max_pumps
             progress_callback(4, 5, "Operation cancelled", True, 'solving', 'Route Optimization Cancelled', True)
         return None, None, None
     
-    # Solve the route
-    solution = routing.SolveWithParameters(search_parameters)
+    # Create a simpler progress monitor that doesn't rely on stderr capture
+    class OptimizationMonitor:
+        def __init__(self, progress_callback, cancellation_event, time_limit_seconds=60):
+            self.progress_callback = progress_callback
+            self.cancellation_event = cancellation_event
+            self.start_time = time.time()
+            self.time_limit = time_limit_seconds
+            self.last_progress = 0
+            
+        def update_progress(self):
+            if self.progress_callback:
+                elapsed = int(time.time() - self.start_time)
+                # Estimate progress based on time elapsed (capped at 95% until completion)
+                time_progress = min(95, int((elapsed / self.time_limit) * 100))
+                
+                # Update more frequently for shorter optimization
+                if time_progress > self.last_progress + 5 or elapsed % 5 == 0:
+                    message = f"Optimizing route... ~{time_progress}% complete ({elapsed}s elapsed)"
+                    self.progress_callback(4, 5, message, False, 'solving', 'Route Optimization')
+                    self.last_progress = time_progress
+                
+                return elapsed < self.time_limit
+    
+    monitor = OptimizationMonitor(progress_callback, cancellation_event, search_parameters.time_limit.seconds)
+    
+    # Start a thread to periodically update progress during optimization
+    stop_monitor = threading.Event()
+    
+    def monitor_optimization():
+        while not stop_monitor.is_set():
+            time.sleep(3)  # Update every 3 seconds to reduce overhead
+            if not stop_monitor.is_set():
+                if not monitor.update_progress():
+                    # Time limit approaching, stop monitoring
+                    break
+    
+    monitor_thread = threading.Thread(target=monitor_optimization, daemon=True)
+    monitor_thread.start()
+    
+    try:
+        # Solve the route with a timeout wrapper
+        logger.info(f"Starting route optimization with {search_parameters.time_limit.seconds}s time limit")
+        solution = routing.SolveWithParameters(search_parameters)
+        logger.info("Route optimization completed")
+    finally:
+        # Stop the monitoring thread
+        stop_monitor.set()
+        monitor_thread.join(timeout=1)  # Wait up to 1 second for thread to finish
     
     # If no solution was found, try with a different strategy
     if not solution:
@@ -572,6 +594,7 @@ def solve_route(data, progress_callback=None, cancellation_event=None, max_pumps
     
     if progress_callback:
         if solution:
+            # Simple completion message
             progress_callback(5, 5, "Optimization complete, solution found!", False, 'solving', 'Route Optimization')
         else:
             progress_callback(5, 5, "Optimization complete, but no solution found.", False, 'solving', 'Route Optimization')
@@ -707,7 +730,9 @@ def extract_route_plan(solution, manager, routing, stations):
     return route_plan
 
 def plan_optimal_route(excel_file, hours=8, max_stations=None, max_pumps=20, time_between_stops=10, 
-                       progress_callback=None, cancellation_event=None, use_cache=True, include_statuses=None):
+                       progress_callback=None, cancellation_event=None, use_cache=True,
+                       include_normal=True, include_complaints=True, include_reinspections=True,
+                       include_out_of_service=True):
     """
     Main function to plan an optimal route from the Excel data
     
@@ -720,7 +745,10 @@ def plan_optimal_route(excel_file, hours=8, max_stations=None, max_pumps=20, tim
         progress_callback: Function to call for progress updates
         cancellation_event: Event to signal cancellation
         use_cache: Whether to use cached geocoding data
-        include_statuses: List of status types to include ('normal', 'complaint', 'reinspection', 'out_of_service')
+        include_normal: Whether to include normal stations
+        include_complaints: Whether to include stations with complaints
+        include_reinspections: Whether to include stations needing reinspection
+        include_out_of_service: Whether to include stations with out-of-service pumps
         
     Returns:
         List of dictionaries with route plan
@@ -782,6 +810,17 @@ def plan_optimal_route(excel_file, hours=8, max_stations=None, max_pumps=20, tim
     # Extract the route plan
     if solution:
         route_plan = extract_route_plan(solution, manager, routing, stations)
+        
+        # Calculate and report pump utilization if max_pumps was specified
+        if route_plan and max_pumps and max_pumps > 0:
+            total_pumps_in_route = route_plan[0].get('total_pumps', 0)
+            pump_utilization = min(100, int((total_pumps_in_route / max_pumps) * 100))
+            
+            # Update the final progress with pump utilization information
+            if progress_callback:
+                final_msg = f"Route complete! {total_pumps_in_route}/{max_pumps} pumps ({pump_utilization}% of daily limit)"
+                progress_callback(5, 5, final_msg, True, 'complete', 'Route Planning Complete')
+        
         return route_plan
     else:
         logger.warning("No solution found")
@@ -814,3 +853,155 @@ if __name__ == "__main__":
             print(f"{i}. {stop['name']} - {stop['address']} - {stop['pumps_to_inspect']} pumps - {status_str}")
     else:
         print("Failed to generate route plan")
+
+def geocode_stations_only(station_manager, progress_callback=None, cancellation_event=None):
+    """
+    Geocode all stations in the station manager - Stage 2 operation
+    
+    Args:
+        station_manager: StationManager instance with loaded stations
+        progress_callback: Function to report progress
+        cancellation_event: Event to check for cancellation
+        
+    Returns:
+        int: Number of stations successfully geocoded
+    """
+    stations = station_manager.get_all_stations()
+    geocoded_count = 0
+    
+    if progress_callback:
+        progress_callback(0, len(stations), 'Starting geocoding process...', False, 'geocoding', 'Geocoding')
+    
+    for i, station in enumerate(stations):
+        # Check for cancellation
+        if cancellation_event and cancellation_event.is_set():
+            break
+            
+        try:
+            # Only geocode if coordinates are missing
+            if not station.coordinates or station.coordinates == 'None':
+                coords = get_coordinates_local(station.full_address, use_cache=True)
+                if coords:
+                    station.coordinates = f"{coords[0]}, {coords[1]}"
+                    geocoded_count += 1
+                else:
+                    logger.warning(f"Failed to geocode: {station.full_address}")
+            
+            if progress_callback:
+                progress_callback(i + 1, len(stations), 
+                                f'Geocoded {i + 1}/{len(stations)} stations', 
+                                False, 'geocoding', 'Geocoding')
+        except Exception as e:
+            logger.error(f"Error geocoding station {station.full_address}: {e}")
+    
+    # Save updated geocode cache
+    save_geocode_cache()
+    
+    if progress_callback:
+        progress_callback(len(stations), len(stations), 
+                        f'Geocoding complete! {geocoded_count} stations geocoded', 
+                        False, 'geocoding', 'Geocoding Complete')
+    
+    return geocoded_count
+
+def plan_route_from_geocoded_stations(stations, hours=8, max_stations=None, max_pumps=20, 
+                                    time_between_stops=10, progress_callback=None, 
+                                    cancellation_event=None, include_normal=True, 
+                                    include_complaints=True, include_reinspections=True, 
+                                    include_out_of_service=True):
+    """
+    Plan route using pre-geocoded stations - Stage 3 operation
+    
+    Args:
+        stations: List of Station objects with coordinates
+        hours: Work hours available
+        max_stations: Maximum stations to visit
+        max_pumps: Maximum pumps per day
+        time_between_stops: Travel time between stops
+        progress_callback: Function to report progress
+        cancellation_event: Event to check for cancellation
+        include_*: Station type filters
+        
+    Returns:
+        List of route stops or None if failed
+    """
+    if progress_callback:
+        progress_callback(1, 5, 'Filtering stations by type...', False, 'planning', 'Route Planning')
+    
+    # Filter stations by type
+    filtered_stations = []
+    for station in stations:
+        # Check station type and include based on filters
+        include_station = False
+        
+        if include_normal and not any([station.needs_reinspection, station.has_complaint, station.has_out_of_service_pump]):
+            include_station = True
+        if include_complaints and station.has_complaint:
+            include_station = True
+        if include_reinspections and station.needs_reinspection:
+            include_station = True
+        if include_out_of_service and station.has_out_of_service_pump:
+            include_station = True
+            
+        if include_station:
+            filtered_stations.append(station)
+    
+    if not filtered_stations:
+        logger.warning("No stations match the selected filters")
+        return None
+    
+    logger.info(f"Filtered to {len(filtered_stations)} stations based on type filters")
+    
+    if progress_callback:
+        progress_callback(2, 5, f'Using {len(filtered_stations)} stations, sorting by priority...', 
+                        False, 'planning', 'Route Planning')
+    
+    # Sort stations by priority
+    filtered_stations.sort(key=lambda x: x.priority_score, reverse=True)
+    
+    if progress_callback:
+        progress_callback(3, 5, f'Calculating travel times for {len(filtered_stations)} stations...', 
+                        False, 'planning', 'Route Planning')
+    
+    # Calculate travel times and create distance matrix
+    travel_times_df = calculate_drive_times(filtered_stations, progress_callback, cancellation_event=cancellation_event)
+    
+    if cancellation_event and cancellation_event.is_set():
+        return None
+        
+    if travel_times_df is None:
+        logger.error("Failed to calculate travel times")
+        return None
+    
+    if cancellation_event and cancellation_event.is_set():
+        return None
+    
+    if progress_callback:
+        progress_callback(4, 5, 'Running optimization algorithm...', False, 'planning', 'Route Planning')
+    
+    # Create data model
+    data_model = create_data_model(filtered_stations, travel_times_df, hours, max_stations, max_pumps, time_between_stops)
+    
+    # Solve the routing problem
+    solution, manager, routing = solve_route(
+        data_model, 
+        progress_callback, 
+        cancellation_event,
+        max_pumps,
+        max_stations
+    )
+    
+    if progress_callback:
+        if solution:
+            progress_callback(5, 5, 'Extracting route plan...', False, 'planning', 'Route Planning Complete')
+        else:
+            progress_callback(5, 5, 'Route planning failed', True, 'planning', 'Route Planning Failed')
+            return None
+    
+    # Extract the route plan from the solution
+    if solution:
+        route_plan = extract_route_plan(solution, manager, routing, filtered_stations)
+        return route_plan
+    else:
+        logger.warning("No solution found")
+        return None

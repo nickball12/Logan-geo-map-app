@@ -124,6 +124,7 @@ def progress():
     """Server-sent events endpoint for progress updates"""
     def generate():
         last_data = None
+        logger.info("Starting SSE progress stream")
         while True:
             try:
                 # Check if process was cancelled
@@ -133,6 +134,7 @@ def progress():
                         'progress': 'Operation cancelled by user',
                         'cancelled': True
                     }
+                    logger.info("Sending cancellation data via SSE")
                     yield f"data: {json.dumps(cancel_data)}\n\n"
                     break
                 
@@ -140,24 +142,28 @@ def progress():
                 try:
                     latest_data = progress_queue.get(timeout=0.5)
                     # If we got new data, update it and send it
+                    logger.info(f"Sending progress data via SSE: {latest_data}")
                     yield f"data: {json.dumps(latest_data)}\n\n"
                     last_data = latest_data
                     # If the process is done or cancelled, break out of the loop
                     if latest_data.get('done', False) or latest_data.get('cancelled', False):
+                        logger.info("Progress completed, ending SSE stream")
                         break
                 except:
                     # If the queue is empty, send the current progress data
                     # Only send if it's different from the last sent data
                     current_data = progress_data.copy()
                     if current_data != last_data:
+                        logger.debug(f"Sending current progress data via SSE: {current_data}")
                         yield f"data: {json.dumps(current_data)}\n\n"
                         last_data = current_data
                     time.sleep(0.5)
             except GeneratorExit:
                 # Client disconnected
+                logger.info("SSE client disconnected")
                 break
             except Exception as e:
-                print(f"Error in progress SSE: {e}")
+                logger.error(f"Error in progress SSE: {e}")
                 time.sleep(1)
                 
     return Response(generate(), mimetype='text/event-stream', headers={
@@ -197,15 +203,29 @@ def index():
     cancellation_event.clear()
     update_progress(0, 0, 'Ready to process', False, 'init', 'Ready')
     
+    # For GET requests or simple POST without file upload, just show the interface
+    if request.method == 'GET':
+        return render_template('index.html', 
+                              error=error, 
+                              status=status, 
+                              route_plan=route_plan,
+                              time_between_stops=session.get('time_between_stops', 0),
+                              saved_data_exists=saved_data_exists)
+    
+    # Handle legacy POST requests that upload files directly
+    # This maintains backward compatibility but the new workflow uses separate endpoints
     if request.method == 'POST':
         try:
+            # Legacy route - still support direct file upload and routing for compatibility
+            # But the new UI will use the separate endpoints
+            
             # Reset cancellation event at the start of processing
             cancellation_event.clear()
             
             # Get form data with defaults
             skip_rows = int(request.form.get('skip_rows', 3))
             max_pumps_per_day = int(request.form.get('max_pumps_per_day', 20))
-            hours_to_work = float(request.form.get('hours', 8))  # Default 8 hours
+            hours_to_work = float(request.form.get('hours', 8))
             time_between_stops = int(request.form.get('time_between_stops', 0))
             max_stations = int(request.form.get('max_stations', 0))
             
@@ -246,8 +266,16 @@ def index():
                 # Plan route using saved stations
                 update_progress(0, 5, "Planning route from saved data", False, 'data', 'Route Planning')
                 
-                # We need to create a function to plan routes from stations
-                route_plan = plan_route_from_stations(
+                # Convert status filters to boolean flags for the new function
+                include_normal = 'normal' in include_statuses
+                include_complaints = 'complaint' in include_statuses
+                include_reinspections = 'reinspection' in include_statuses
+                include_out_of_service = 'out_of_service' in include_statuses
+                
+                # Use the new separated route planning function
+                from new_route_planner import plan_route_from_geocoded_stations
+                
+                route_plan = plan_route_from_geocoded_stations(
                     all_stations,
                     hours=hours_to_work,
                     max_stations=max_stations if max_stations > 0 else None,
@@ -255,13 +283,14 @@ def index():
                     time_between_stops=time_between_stops,
                     progress_callback=update_progress,
                     cancellation_event=cancellation_event,
-                    use_cache=use_cache,
-                    include_statuses=include_statuses
+                    include_normal=include_normal,
+                    include_complaints=include_complaints,
+                    include_reinspections=include_reinspections,
+                    include_out_of_service=include_out_of_service
                 )
                 
                 # Check if operation was cancelled
                 if cancellation_event.is_set():
-                    # Operation was cancelled
                     error = "Operation cancelled by user"
                     session['error'] = error
                     session['status'] = status
@@ -270,10 +299,7 @@ def index():
                     
                 if route_plan:
                     status += f" Route generated with {len(route_plan) - 1} stops."
-                    
-                    # Save route plan to a file for easy access
                     save_route_to_file(route_plan)
-                    
                     update_progress(5, 5, 
                                   f"Route with {len(route_plan) - 1} stops generated successfully", 
                                   True, 'solving', 'Route Optimization Complete')
@@ -289,11 +315,10 @@ def index():
                 session['time_between_stops'] = time_between_stops
                 return redirect(url_for('index'))
             else:
-                # Process uploaded file
+                # Legacy file upload and immediate processing
                 status = "Processing uploaded file..."
-                # Check if a file was uploaded
+                
                 if 'file' not in request.files:
-                    # If no file was uploaded, but we have saved data, that's ok
                     if has_saved_data():
                         status = "Using saved station data..."
                         return redirect(url_for('index'))
@@ -309,99 +334,72 @@ def index():
                     else:
                         error = "No file selected. Please upload an Excel file."
                         return redirect(url_for('index'))
-                # Remove all files in uploads directory
+                
+                # Process file using legacy method
                 uploads_dir = app.config['UPLOAD_FOLDER']
                 for f in os.listdir(uploads_dir):
                     file_path = os.path.join(uploads_dir, f)
                     if os.path.isfile(file_path):
                         os.remove(file_path)
-                # Save the new uploaded file
+                
                 data_file_path = os.path.join(uploads_dir, file.filename)
                 os.makedirs(uploads_dir, exist_ok=True)
                 file.save(data_file_path)
-                # Store the file path in the session for later use
                 session['latest_file'] = data_file_path
-                update_progress(1, 5, f"Saved file: {file.filename}", False, 'data', 'Data Preparation')
-                # Optionally clear any persisted or in-memory data here
-                # For example, call reset_app() or similar logic if needed
-                # Create cache directory if it doesn't exist
-                cache_dir = os.path.join("cache")
-                os.makedirs(cache_dir, exist_ok=True)
-                # Generate cache filename based on input parameters
-                cache_key = f"{file.filename}_{skip_rows}"
-                cache_file = os.path.join(cache_dir, f"{cache_key.replace('/', '_')}.pkl")
-                update_progress(2, 5, "Checking cache", False, 'data', 'Data Preparation')
-            
-            # Get station type filters from form
-            include_normal = 'include_normal' in request.form
-            include_complaints = 'include_complaints' in request.form
-            include_reinspections = 'include_reinspections' in request.form
-            include_out_of_service = 'include_out_of_service' in request.form
-            
-            # If no filters selected, include all types
-            if not any([include_normal, include_complaints, include_reinspections, include_out_of_service]):
-                include_normal = include_complaints = include_reinspections = include_out_of_service = True
-            
-            # Get filter flags from form
-            include_normal = 'include_normal' in request.form
-            include_complaints = 'include_complaints' in request.form
-            include_reinspections = 'include_reinspections' in request.form
-            include_out_of_service = 'include_out_of_service' in request.form
+                
+                # Get filter flags from form
+                include_normal = 'include_normal' in request.form
+                include_complaints = 'include_complaints' in request.form
+                include_reinspections = 'include_reinspections' in request.form
+                include_out_of_service = 'include_out_of_service' in request.form
 
-            # If no filters selected, include all types
-            if not any([include_normal, include_complaints, include_reinspections, include_out_of_service]):
-                include_normal = include_complaints = include_reinspections = include_out_of_service = True
+                # If no filters selected, include all types
+                if not any([include_normal, include_complaints, include_reinspections, include_out_of_service]):
+                    include_normal = include_complaints = include_reinspections = include_out_of_service = True
 
-            # Plan the optimal route using new route planner
-            update_progress(3, 5, "Planning optimal route", False, 'data', 'Route Planning')
-            
-            route_plan = plan_optimal_route(
-                data_file_path,  # Positional argument for excel_file
-                hours=hours_to_work,
-                max_stations=max_stations if max_stations > 0 else None,
-                max_pumps=max_pumps_per_day,
-                time_between_stops=time_between_stops,
-                progress_callback=update_progress,
-                cancellation_event=cancellation_event,
-                use_cache=use_cache,
-                include_normal=include_normal,
-                include_complaints=include_complaints,
-                include_reinspections=include_reinspections,
-                include_out_of_service=include_out_of_service
-            )
-            
-            # Check if operation was cancelled
-            if cancellation_event.is_set():
-                # Operation was cancelled
-                error = "Operation cancelled by user"
+                # Plan the optimal route using legacy method
+                update_progress(3, 5, "Planning optimal route", False, 'data', 'Route Planning')
+                
+                route_plan = plan_optimal_route(
+                    data_file_path,
+                    hours=hours_to_work,
+                    max_stations=max_stations if max_stations > 0 else None,
+                    max_pumps=max_pumps_per_day,
+                    time_between_stops=time_between_stops,
+                    progress_callback=update_progress,
+                    cancellation_event=cancellation_event,
+                    use_cache=use_cache,
+                    include_normal=include_normal,
+                    include_complaints=include_complaints,
+                    include_reinspections=include_reinspections,
+                    include_out_of_service=include_out_of_service
+                )
+                
+                if cancellation_event.is_set():
+                    error = "Operation cancelled by user"
+                    session['error'] = error
+                    session['status'] = status
+                    session['route_plan'] = None
+                    return redirect(url_for('index'))
+                    
+                if route_plan:
+                    status += f" Route generated with {len(route_plan) - 1} stops."
+                    save_route_to_file(route_plan)
+                    update_progress(5, 5, 
+                                  f"Route with {len(route_plan) - 1} stops generated successfully", 
+                                  True, 'solving', 'Route Optimization Complete')
+                else:
+                    error = "Failed to generate any route within the time constraint. Please try increasing work hours."
+                    update_progress(5, 5, "Route optimization failed. Please try increasing work hours.", 
+                                  True, 'solving', 'Route Optimization Failed')
+                
                 session['error'] = error
                 session['status'] = status
-                session['route_plan'] = None
+                session['route_plan'] = route_plan if route_plan else None
+                session['time_between_stops'] = time_between_stops
                 return redirect(url_for('index'))
-                
-            if route_plan:
-                status += f" Route generated with {len(route_plan) - 1} stops."
-                
-                # Save route plan to a file for easy access
-                save_route_to_file(route_plan)
-                
-                update_progress(5, 5, 
-                              f"Route with {len(route_plan) - 1} stops generated successfully", 
-                              True, 'solving', 'Route Optimization Complete')
-            else:
-                error = "Failed to generate any route within the time constraint. Please try increasing work hours."
-                update_progress(5, 5, "Route optimization failed. Please try increasing work hours.", 
-                              True, 'solving', 'Route Optimization Failed')
-            
-            # Store results in session for redirect
-            session['error'] = error
-            session['status'] = status
-            session['route_plan'] = route_plan if route_plan else None
-            session['time_between_stops'] = time_between_stops
-            return redirect(url_for('index'))
             
         except Exception as e:
-            # Check if this was a cancellation
             if cancellation_event.is_set() or "Operation cancelled" in str(e):
                 error = "Operation cancelled by user"
                 status = "Processing cancelled"
@@ -421,116 +419,239 @@ def index():
                           time_between_stops=session.get('time_between_stops', 0),
                           saved_data_exists=saved_data_exists)
 
+@app.route('/upload_file', methods=['POST'])
+def upload_file():
+    """Handle file upload and data processing - Stage 1"""
+    try:
+        # Reset cancellation event
+        global cancellation_event
+        cancellation_event.clear()
+        
+        # Check if a file was uploaded
+        if 'file' not in request.files:
+            return jsonify({'error': 'No file uploaded'}), 400
+            
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({'error': 'No file selected'}), 400
+        
+        # Get form parameters
+        skip_rows = int(request.form.get('skip_rows', 3))
+        
+        # Remove all files in uploads directory
+        uploads_dir = app.config['UPLOAD_FOLDER']
+        for f in os.listdir(uploads_dir):
+            file_path = os.path.join(uploads_dir, f)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+        
+        # Save the new uploaded file
+        data_file_path = os.path.join(uploads_dir, file.filename)
+        os.makedirs(uploads_dir, exist_ok=True)
+        file.save(data_file_path)
+        
+        # Store the file path in the session
+        session['latest_file'] = data_file_path
+        
+        # Load and process station data
+        station_manager = StationManager()
+        station_manager.load_from_excel(data_file_path)
+        
+        # Save station data
+        save_stations(station_manager)
+        
+        # Automatically geocode stations after loading
+        try:
+            from new_route_planner import geocode_stations_only
+            geocoded_count = geocode_stations_only(
+                station_manager, 
+                progress_callback=update_progress,
+                cancellation_event=cancellation_event
+            )
+            # Save updated station data with geocoding
+            save_stations(station_manager)
+        except Exception as geocode_error:
+            logger.warning(f"Geocoding failed during upload: {geocode_error}")
+            # Continue without geocoding - route planning will handle this
+        
+        # Get station count for response
+        station_count = len(station_manager.get_all_stations())
+        
+        return jsonify({
+            'success': True, 
+            'message': f'File uploaded and processed successfully. {station_count} stations loaded.',
+            'station_count': station_count,
+            'filename': file.filename
+        })
+        
+    except Exception as e:
+        logger.error(f"Error uploading file: {e}", exc_info=True)
+        return jsonify({'error': f'Error processing file: {str(e)}'}), 500
+
+@app.route('/check_data_exists', methods=['GET'])
+def check_data_exists():
+    """Check if station data exists"""
+    try:
+        station_manager = load_stations()
+        exists = station_manager is not None and station_manager.stations and len(station_manager.stations) > 0
+        return jsonify({'exists': exists})
+    except Exception as e:
+        return jsonify({'exists': False})
+
+@app.route('/geocode_stations', methods=['POST'])
+def geocode_stations():
+    """Geocode all stations - Stage 2"""
+    try:
+        # Load stations
+        station_manager = load_stations()
+        if not station_manager:
+            return jsonify({'error': 'No station data available. Please upload a file first.'}), 400
+        
+        # Reset cancellation event
+        global cancellation_event
+        cancellation_event.clear()
+        
+        # Import geocoding function from route planner
+        from new_route_planner import geocode_stations_only
+        
+        # Geocode all stations
+        geocoded_count = geocode_stations_only(
+            station_manager, 
+            progress_callback=update_progress,
+            cancellation_event=cancellation_event
+        )
+        
+        if cancellation_event.is_set():
+            return jsonify({'error': 'Geocoding cancelled by user'}), 400
+        
+        # Save updated station data
+        save_stations(station_manager)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Geocoding completed for {geocoded_count} stations.',
+            'geocoded_count': geocoded_count
+        })
+        
+    except Exception as e:
+        logger.error(f"Error geocoding stations: {e}", exc_info=True)
+        return jsonify({'error': f'Error geocoding stations: {str(e)}'}), 500
+
+@app.route('/plan_route', methods=['POST'])
+def plan_route():
+    """Plan route using geocoded stations - Stage 3"""
+    try:
+        # Load stations
+        station_manager = load_stations()
+        if not station_manager:
+            return jsonify({'error': 'No station data available. Please upload a file first.'}), 400
+        
+        # Reset cancellation event
+        global cancellation_event
+        cancellation_event.clear()
+        
+        # Get form parameters
+        max_pumps_per_day = int(request.form.get('max_pumps_per_day', 20))
+        hours_to_work = float(request.form.get('hours', 8))
+        time_between_stops = int(request.form.get('time_between_stops', 0))
+        max_stations = int(request.form.get('max_stations', 0))
+        
+        # Get station type filters
+        include_normal = 'include_normal' in request.form
+        include_complaints = 'include_complaints' in request.form
+        include_reinspections = 'include_reinspections' in request.form
+        include_out_of_service = 'include_out_of_service' in request.form
+        
+        # If no filters selected, include all types
+        if not any([include_normal, include_complaints, include_reinspections, include_out_of_service]):
+            include_normal = include_complaints = include_reinspections = include_out_of_service = True
+        
+        # Get all stations
+        all_stations = station_manager.get_all_stations()
+        
+        # Plan route using pre-geocoded stations
+        from new_route_planner import plan_route_from_geocoded_stations
+        
+        route_plan = plan_route_from_geocoded_stations(
+            all_stations,
+            hours=hours_to_work,
+            max_stations=max_stations if max_stations > 0 else None,
+            max_pumps=max_pumps_per_day,
+            time_between_stops=time_between_stops,
+            progress_callback=update_progress,
+            cancellation_event=cancellation_event,
+            include_normal=include_normal,
+            include_complaints=include_complaints,
+            include_reinspections=include_reinspections,
+            include_out_of_service=include_out_of_service
+        )
+        
+        if cancellation_event.is_set():
+            return jsonify({'error': 'Route planning cancelled by user'}), 400
+        
+        if route_plan:
+            # Save route plan to file
+            save_route_to_file(route_plan)
+            
+            # Store in session for display
+            session['route_plan'] = route_plan
+            session['time_between_stops'] = time_between_stops
+            
+            return jsonify({
+                'success': True,
+                'message': f'Route generated with {len(route_plan) - 1} stops.',
+                'route_stops': len(route_plan) - 1
+            })
+        else:
+            return jsonify({'error': 'Failed to generate route. Please try increasing work hours.'}), 400
+        
+    except Exception as e:
+        logger.error(f"Error planning route: {e}", exc_info=True)
+        return jsonify({'error': f'Error planning route: {str(e)}'}), 500
+
 @app.route('/addresses')
 def addresses():
-    station_manager = load_stations()
-    if not station_manager:
-        return redirect(url_for('index', error='No station data available'))
-    
-    # Get all stations and pass them to the template
-    stations = station_manager.get_all_stations()
-    return render_template('addresses.html', stations=stations)
     """Show all extracted addresses with duplicate detection"""
     error = request.args.get('error')
     status = request.args.get('status')
     
-    # First check if we have saved data
-    if has_saved_data():
-        try:
-            # Load station data from saved file
-            station_manager = load_stations()
-            
-            if station_manager and station_manager.stations:
-                # Get all stations
-                all_stations = station_manager.get_all_stations()
-                
-                # Detect duplicate addresses
-                address_count = {}
-                for station in all_stations:
-                    # Use the full address as the key for duplicate detection
-                    if station.full_address in address_count:
-                        address_count[station.full_address] += 1
-                    else:
-                        address_count[station.full_address] = 1
-                
-                # Mark duplicates in the station objects
-                for station in all_stations:
-                    station.is_duplicate = address_count[station.full_address] > 1
-                
-                # Calculate statistics
-                unique_count = sum(1 for count in address_count.values() if count == 1)
-                duplicate_count = sum(1 for count in address_count.values() if count > 1)
-                
-                return render_template('addresses.html', 
-                                      addresses=all_stations, 
-                                      unique_count=unique_count, 
-                                      duplicate_count=duplicate_count,
-                                      error=error,
-                                      status=status,
-                                      editable=True)
-            else:
-                # No valid saved data, try loading from file
-                pass
-        except Exception as e:
-            logger.error(f"Error loading saved data: {e}", exc_info=True)
-            error = f"Error loading saved data: {str(e)}"
-    
-    # If no saved data or error loading saved data, check for uploaded file
-    if not session.get('latest_file'):
+    # Check if we have saved data
+    station_manager = load_stations()
+    if not station_manager or not station_manager.stations:
         return render_template('addresses.html', 
                               addresses=[], 
+                              stations=[],
                               unique_count=0, 
                               duplicate_count=0,
                               error=error or "No data available. Please upload a file first.",
                               editable=False)
     
     try:
-        # Load station data from the most recently processed file
-        station_manager = StationManager()
-        file_path = session.get('latest_file')
-        
-        if not os.path.exists(file_path):
-            return render_template('addresses.html', 
-                                  addresses=[], 
-                                  unique_count=0, 
-                                  duplicate_count=0,
-                                  error=error or f"File not found: {file_path}",
-                                  editable=False)
-        
-        # Load all stations, not just high priority ones
-        if not station_manager.load_from_excel(file_path):
-            return render_template('addresses.html', 
-                                  addresses=[], 
-                                  unique_count=0, 
-                                  duplicate_count=0,
-                                  error=error or "Failed to load data from the Excel file",
-                                  editable=False)
-        
         # Get all stations
         all_stations = station_manager.get_all_stations()
         
-        # Save stations to persistent storage
-        save_stations(station_manager)
-        
-        # Detect duplicate addresses
+        # Detect duplicate addresses using the current data
         address_count = {}
         for station in all_stations:
             # Use the full address as the key for duplicate detection
-            if station.full_address in address_count:
-                address_count[station.full_address] += 1
+            full_addr = station.full_address or f"{station.address}, {station.city}, {station.state} {station.zip_code}"
+            if full_addr in address_count:
+                address_count[full_addr] += 1
             else:
-                address_count[station.full_address] = 1
+                address_count[full_addr] = 1
         
         # Mark duplicates in the station objects
         for station in all_stations:
-            station.is_duplicate = address_count[station.full_address] > 1
+            full_addr = station.full_address or f"{station.address}, {station.city}, {station.state} {station.zip_code}"
+            station.is_duplicate = address_count[full_addr] > 1
         
         # Calculate statistics
         unique_count = sum(1 for count in address_count.values() if count == 1)
         duplicate_count = sum(1 for count in address_count.values() if count > 1)
         
         return render_template('addresses.html', 
-                              addresses=all_stations, 
+                              addresses=all_stations,
+                              stations=all_stations, 
                               unique_count=unique_count, 
                               duplicate_count=duplicate_count,
                               error=error,
@@ -541,11 +662,11 @@ def addresses():
         logger.error(f"Error displaying addresses: {e}", exc_info=True)
         return render_template('addresses.html', 
                               addresses=[], 
+                              stations=[],
                               unique_count=0, 
                               duplicate_count=0,
                               error=error or f"Error: {str(e)}",
                               editable=False)
-
 @app.route('/refresh_status')
 def refresh_status():
     """Refresh station status from all sheets in the Excel file"""
@@ -1295,6 +1416,37 @@ def edit_station():
         save_stations(station_manager)
         
         return jsonify({'success': True, 'message': 'Station updated successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/delete_station', methods=['POST'])
+def delete_station():
+    try:
+        data = request.json
+        business_id = data.get('business_id')
+        if not business_id:
+            return jsonify({'error': 'Business ID is required'}), 400
+
+        station_manager = load_stations()
+        if not station_manager:
+            return jsonify({'error': 'Failed to load station data'}), 500
+
+        station = station_manager.get_station_by_id(business_id)
+        if not station:
+            return jsonify({'error': 'Station not found'}), 404
+
+        # Remove station from the manager
+        if hasattr(station_manager, 'stations') and isinstance(station_manager.stations, list):
+            station_manager.stations = [s for s in station_manager.stations if s.business_id != business_id]
+        elif hasattr(station_manager, 'stations') and isinstance(station_manager.stations, dict):
+            station_manager.stations.pop(business_id, None)
+        else:
+            return jsonify({'error': 'Unable to delete station: invalid station manager structure'}), 500
+
+        # Save updated stations
+        save_stations(station_manager)
+        
+        return jsonify({'success': True, 'message': f'Station {business_id} deleted successfully'})
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

@@ -200,6 +200,127 @@
             text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
         }
         
+        /* Stage sections styling */
+        .stage-section {
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            background-color: #f9f9f9;
+        }
+        
+        .stage-section h3 {
+            color: #2c3e50;
+            margin-top: 0;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #ddd;
+        }
+        
+        .stage-section.active {
+            border-color: #3498db;
+            background-color: #e8f4fd;
+        }
+        
+        .stage-section.completed {
+            border-color: #27ae60;
+            background-color: #e8f6f0;
+        }
+        
+        .stage-section.disabled {
+            opacity: 0.6;
+            background-color: #f5f5f5;
+        }
+        
+        .status-info {
+            padding: 10px;
+            margin-top: 10px;
+            border-radius: 4px;
+            font-weight: bold;
+        }
+        
+        .status-info.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status-info.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status-info.processing {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        
+        .submit-button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        
+        .submit-button:disabled:hover {
+            background-color: #95a5a6;
+        }
+        
+        /* Progress indicator for stages */
+        .stage-progress {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+            padding: 0 20px;
+        }
+        
+        .stage-indicator {
+            flex: 1;
+            text-align: center;
+            position: relative;
+        }
+        
+        .stage-indicator:not(:last-child)::after {
+            content: '';
+            position: absolute;
+            top: 15px;
+            right: -50%;
+            width: 100%;
+            height: 2px;
+            background-color: #ddd;
+            z-index: 1;
+        }
+        
+        .stage-indicator.completed:not(:last-child)::after {
+            background-color: #27ae60;
+        }
+        
+        .stage-number {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background-color: #ddd;
+            color: white;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 5px;
+            position: relative;
+            z-index: 2;
+        }
+        
+        .stage-indicator.active .stage-number {
+            background-color: #3498db;
+        }
+        
+        .stage-indicator.completed .stage-number {
+            background-color: #27ae60;
+        }
+        
+        .stage-label {
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
         /* Cancel button styles */
         .cancel-button {
             background-color: #e74c3c;
@@ -347,15 +468,35 @@
     </div>
 
     <!-- Upload Form Section -->
-    <div class="upload-section">
+    <div class="upload-section" id="upload-section">
         <h2>Upload Station Data</h2>
-        <form action="/" method="post" enctype="multipart/form-data" id="route-form">
+        
+        <form id="upload-form" enctype="multipart/form-data">
             <div class="form-group file-upload">
                 <label for="file">Excel File:</label>
-                <input type="file" id="file" name="file" accept=".xlsx,.xls,.csv">
+                <input type="file" id="file" name="file" accept=".xlsx,.xls,.csv" required>
                 <div class="file-format-hint">Upload an Excel file with multiple sheets (Main sheet, Reinspection, Complaints, Out-of-Service)</div>
             </div>
             
+            <div class="form-group">
+                <label for="skip_rows">Skip Rows:</label>
+                <input type="number" id="skip_rows" name="skip_rows" value="3" required>
+                <div class="file-format-hint">Number of header rows to skip in the Excel file</div>
+            </div>
+
+            <button type="submit" class="submit-button" id="upload-btn">
+                <i class="fas fa-upload"></i> Upload and Process Data
+            </button>
+        </form>
+        <div id="upload-status" class="status-info" style="display:none;"></div>
+    </div>
+
+    <!-- Route Generation Section -->
+    <div class="upload-section" id="route-section">
+        <h2>Generate Route</h2>
+        
+        <form id="route-form">
+            <!-- Basic Route Parameters -->
             <div class="form-group">
                 <label for="hours">Hours to work:</label>
                 <input type="number" id="hours" name="hours" step="0.1" value="8" required>
@@ -366,27 +507,30 @@
                 <input type="number" id="time_between_stops" name="time_between_stops" step="1" value="0" min="0" required>
                 <div class="file-format-hint">Additional time to add between stops (e.g., for breaks, setup, or travel buffer)</div>
             </div>
-
+            
             <div class="form-group">
-                <label for="max_stations">Maximum Stations (optional):</label>
-                <input type="number" id="max_stations" name="max_stations" value="0" min="0" step="1">
-                <div class="file-format-hint">Maximum number of stations to visit (0 for no limit)</div>
+                <label for="time_per_pump">Time per pump (min):</label>
+                <input type="number" id="time_per_pump" name="time_per_pump" step="1" value="15" min="1" required>
+                <div class="file-format-hint">Time to spend inspecting each pump</div>
             </div>
             
             <div class="form-group">
-                <label for="max_pumps_per_day">Maximum Pumps Per Day:</label>
+                <label for="max_pumps_per_day">Maximum pumps per day:</label>
                 <input type="number" id="max_pumps_per_day" name="max_pumps_per_day" value="20" min="1" max="100" step="1" required>
                 <div class="file-format-hint">Maximum total number of pumps you want to inspect in a day</div>
             </div>
             
-            <div class="form-group">
-                <label for="skip_rows">Skip Rows:</label>
-                <input type="number" id="skip_rows" name="skip_rows" value="3" required>
-                <div class="file-format-hint">Number of header rows to skip in the Excel file</div>
-            </div>
-            
-            <div class="form-group">
-                <h3>Include Station Types:</h3>
+            <!-- Priority Settings -->
+            <div class="form-group optimization-info" style="border: 1px solid #ddd; padding: 15px; background-color: #f9f9f9; margin: 20px 0; border-radius: 5px;">
+                <h3 style="margin-top: 0;">Priority Settings</h3>
+                
+                <div class="form-group">
+                    <label for="prioritize_by_age">Prioritize by age:</label>
+                    <input type="checkbox" id="prioritize_by_age" name="prioritize_by_age" value="1" checked>
+                    <div class="file-format-hint">Prioritize stations that haven't been visited recently</div>
+                </div>
+                
+                <h4>Include Station Types:</h4>
                 <div class="checkbox-group">
                     <label>
                         <input type="checkbox" id="include_normal" name="include_normal" value="1" checked>
@@ -396,13 +540,13 @@
                 <div class="checkbox-group">
                     <label>
                         <input type="checkbox" id="include_complaints" name="include_complaints" value="1" checked>
-                        Stations with Complaints
+                        Stations with Complaints (Highest Priority)
                     </label>
                 </div>
                 <div class="checkbox-group">
                     <label>
                         <input type="checkbox" id="include_reinspections" name="include_reinspections" value="1" checked>
-                        Stations Needing Reinspection
+                        Stations Needing Reinspection (High Priority)
                     </label>
                 </div>
                 <div class="checkbox-group">
@@ -412,17 +556,13 @@
                     </label>
                 </div>
             </div>
-            
-            <div class="form-group">
-                <label for="use_cache">Use cached geocoding results:</label>
-                <input type="checkbox" id="use_cache" name="use_cache" value="1" checked>
-                <div class="file-format-hint">Use previously cached geocoding results for faster processing</div>
-            </div>
 
-            <button type="submit" class="submit-button">
-                <i class="fas fa-upload"></i> Upload and Process
+            <button type="submit" class="submit-button" id="route-btn">
+                <i class="fas fa-route"></i> Generate Route Plan
             </button>
         </form>
+        <div id="route-status" class="status-info" style="display:none;"></div>
+    </div>
     </div>
 
     {% if error %}
@@ -447,105 +587,6 @@
         <div id="progress-detail" class="progress-text">Getting ready...</div>
         <button id="cancel-button" class="cancel-button">Cancel Processing</button>
     </div>
-
-    <!-- Info Panel -->
-    <div class="form-group optimization-info" style="border: 1px solid #ddd; padding: 10px; background-color: #f9f9f9; margin-bottom: 15px; border-radius: 5px;">
-        <h3 style="margin-top: 0;">Prioritization Information</h3>
-        <p>Stations are prioritized in the following order:</p>
-        <ol>
-            <li><strong>Complaints:</strong> Stations with customer complaints are highest priority</li>
-            <li><strong>Reinspections:</strong> Stations that need reinspection are prioritized next</li>
-            <li><strong>Out-of-Service Pumps:</strong> Stations with out-of-service pumps are checked</li>
-            <li><strong>Last Visited Date:</strong> Stations not visited recently are prioritized</li>
-            <li><strong>Location:</strong> After handling priority stations, nearby locations are prioritized</li>
-        </ol>
-    </div>
-        
-        <div class="form-group optimization-info" style="border: 1px solid #ddd; padding: 10px; background-color: #f9f9f9; margin-bottom: 15px; border-radius: 5px;">
-            <h3 style="margin-top: 0;">Prioritization Information</h3>
-            <p>Stations are prioritized in the following order:</p>
-            <ol>
-                <li><strong>Complaints:</strong> Stations with customer complaints are highest priority</li>
-                <li><strong>Reinspections:</strong> Stations that need reinspection are prioritized next</li>
-                <li><strong>Out-of-Service Pumps:</strong> Stations with out-of-service pumps are checked</li>
-                <li><strong>Last Visited Date:</strong> Stations not visited recently are prioritized</li>
-                <li><strong>Location:</strong> After handling priority stations, nearby locations are prioritized</li>
-            </ol>
-        </div>
-        
-        <div class="form-group">
-            <h3>Include Station Types:</h3>
-            <div class="checkbox-group">
-                <label>
-                    <input type="checkbox" id="include_normal" name="include_normal" value="1" checked>
-                    Normal Stations
-                </label>
-            </div>
-            <div class="checkbox-group">
-                <label>
-                    <input type="checkbox" id="include_complaints" name="include_complaints" value="1" checked>
-                    Stations with Complaints
-                </label>
-            </div>
-            <div class="checkbox-group">
-                <label>
-                    <input type="checkbox" id="include_reinspections" name="include_reinspections" value="1" checked>
-                    Stations Needing Reinspection
-                </label>
-            </div>
-            <div class="checkbox-group">
-                <label>
-                    <input type="checkbox" id="include_out_of_service" name="include_out_of_service" value="1" checked>
-                    Stations with Out-of-Service Pumps
-                </label>
-            </div>
-        </div>
-        
-        <div class="form-group">
-            <label for="use_cache">Use cached geocoding results:</label>
-            <input type="checkbox" id="use_cache" name="use_cache" value="1" checked>
-            <div class="file-format-hint">Use previously cached geocoding results for faster processing</div>
-        </div>
-        
-        {% if saved_data_exists %}
-        <div class="form-group">
-            <label for="use_saved_data">Use saved station data:</label>
-            <input type="checkbox" id="use_saved_data" name="use_saved_data" value="1" checked>
-            <div class="file-format-hint">Use previously saved station data instead of uploading a new file</div>
-        </div>
-        
-        <script>
-            // Toggle file input based on saved data option
-            document.addEventListener('DOMContentLoaded', function() {
-                const useSavedDataCheckbox = document.getElementById('use_saved_data');
-                const fileInput = document.getElementById('file');
-                const skipRowsInput = document.getElementById('skip_rows');
-                const fileFormGroup = fileInput.parentElement;
-                const skipRowsFormGroup = skipRowsInput.parentElement;
-                
-                function toggleFileInput() {
-                    if (useSavedDataCheckbox.checked) {
-                        fileInput.required = false;
-                        fileFormGroup.style.display = 'none';
-                        skipRowsFormGroup.style.display = 'none';
-                    } else {
-                        fileInput.required = true;
-                        fileFormGroup.style.display = 'block';
-                        skipRowsFormGroup.style.display = 'block';
-                    }
-                }
-                
-                // Initial toggle
-                toggleFileInput();
-                
-                // Toggle on change
-                useSavedDataCheckbox.addEventListener('change', toggleFileInput);
-            });
-        </script>
-        {% endif %}
-        
-        <input type="submit" value="Plan Route" id="submit-button">
-    </form>
 
     {% if error %}
     <div style="color: red; margin-top: 20px;">
@@ -645,7 +686,18 @@
 
     <script>
         document.addEventListener('DOMContentLoaded', function() {
-            const form = document.getElementById('route-form');
+            // Form elements
+            const uploadForm = document.getElementById('upload-form');
+            const routeForm = document.getElementById('route-form');
+            const uploadSection = document.getElementById('upload-section');
+            const routeSection = document.getElementById('route-section');
+            
+            // Status elements
+            const uploadStatus = document.getElementById('upload-status');
+            const routeStatus = document.getElementById('route-status');
+            
+            
+            // Legacy elements (for backward compatibility)
             const loadingOverlay = document.getElementById('loading-overlay');
             const progressBar = document.getElementById('progress-bar');
             const progressDetail = document.getElementById('progress-detail');
@@ -656,12 +708,177 @@
             const savedRoutesSection = document.getElementById('saved-routes-section');
             const savedRoutesContent = document.getElementById('saved-routes-content');
             let eventSource;
-
-            if (form) {
-                form.addEventListener('submit', function(e) {
-                    loadingOverlay.style.display = 'flex';
-                    // Start the SSE connection
+            
+            function showStatus(element, message, type) {
+                element.style.display = 'block';
+                element.textContent = message;
+                element.className = 'status-info ' + type;
+            }
+            
+            // Check if data exists and hide upload section if it does
+            function checkDataExists() {
+                fetch('/check_data_exists')
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.exists) {
+                            uploadSection.style.display = 'none';
+                        } else {
+                            uploadSection.style.display = 'block';
+                        }
+                    })
+                    .catch(error => {
+                        console.log('Could not check data existence:', error);
+                        // Show upload section by default if check fails
+                        uploadSection.style.display = 'block';
+                    });
+            }
+            
+            // Check data existence on page load
+            checkDataExists();
+            
+            // Upload form handling
+            if (uploadForm) {
+                uploadForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    
+                    const formData = new FormData(uploadForm);
+                    showStatus(uploadStatus, 'Uploading and processing data...', 'processing');
+                    
+                    fetch('/upload_file', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            showStatus(uploadStatus, 'Data uploaded successfully!', 'success');
+                            // Hide upload section and show route section
+                            uploadSection.style.display = 'none';
+                        } else {
+                            showStatus(uploadStatus, 'Error: ' + data.error, 'error');
+                        }
+                    })
+                    .catch(error => {
+                        showStatus(uploadStatus, 'Error uploading data: ' + error.message, 'error');
+                    });
+                });
+            }
+            
+            // Route form handling
+            if (routeForm) {
+                routeForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    
+                    const formData = new FormData(routeForm);
+                    showStatus(routeStatus, 'Generating route plan...', 'processing');
+                    
+                    // Show loading overlay for route generation
+                    if (loadingOverlay) {
+                        loadingOverlay.style.display = 'flex';
+                        connectToEventSource();
+                    }
+                    
+                    fetch('/plan_route', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => {
+                        if (response.ok) {
+                            // Route generation started, will be handled by SSE
+                            showStatus(routeStatus, 'Route generation started...', 'processing');
+                        } else {
+                            throw new Error('Failed to start route generation');
+                        }
+                    })
+                    .catch(error => {
+                        showStatus(routeStatus, 'Error generating route: ' + error.message, 'error');
+                        if (loadingOverlay) {
+                            loadingOverlay.style.display = 'none';
+                        }
+                    });
+                });
+            }
+            
+            function showStatus(element, message, type) {
+                element.style.display = 'block';
+                element.className = `status-info ${type}`;
+                element.textContent = message;
+            }
+            
+            // File Upload
+            if (uploadForm) {
+                uploadForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    
+                    const formData = new FormData(uploadForm);
+                    showStatus(uploadStatus, 'Uploading and processing file...', 'processing');
+                    
+                    fetch('/upload_file', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            showStatus(uploadStatus, data.message, 'success');
+                            
+                            // Enable the route section
+                            if (routeSection) {
+                                routeSection.style.display = 'block';
+                            }
+                        } else {
+                            showStatus(uploadStatus, data.error || 'Upload failed', 'error');
+                        }
+                    })
+                    .catch(error => {
+                        showStatus(uploadStatus, 'Error uploading file: ' + error.message, 'error');
+                    });
+                });
+            }
+            
+            // Route form handling
+            if (routeForm) {
+                routeForm.addEventListener('submit', function(e) {
+                    e.preventDefault();
+                    
+                    const formData = new FormData(routeForm);
+                    showStatus(routeStatus, 'Planning route...', 'processing');
+                    document.getElementById('route-btn').disabled = true;
+                    
+                    // Start progress monitoring for route planning
                     connectToEventSource();
+                    
+                    fetch('/plan_route', {
+                        method: 'POST',
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (eventSource) {
+                            eventSource.close();
+                            eventSource = null;
+                        }
+                        
+                        if (data.success) {
+                            showStatus(routeStatus, data.message, 'success');
+                            
+                            // Redirect to show the route result
+                            setTimeout(() => {
+                                window.location.reload();
+                            }, 2000);
+                        } else {
+                            showStatus(routeStatus, data.error || 'Route planning failed', 'error');
+                            document.getElementById('route-btn').disabled = false;
+                        }
+                    })
+                    .catch(error => {
+                        if (eventSource) {
+                            eventSource.close();
+                            eventSource = null;
+                        }
+                        showStatus(routeStatus, 'Error planning route: ' + error.message, 'error');
+                        document.getElementById('route-btn').disabled = false;
+                    });
                 });
             }
 
@@ -674,7 +891,9 @@
             if (viewSavedRoutesBtn) {
                 viewSavedRoutesBtn.addEventListener('click', function() {
                     loadSavedRoutes();
-                    savedRoutesSection.style.display = 'block';
+                    if (savedRoutesSection) {
+                        savedRoutesSection.style.display = 'block';
+                    }
                 });
             }
 
@@ -695,37 +914,20 @@
                 eventSource.onmessage = function(event) {
                     const data = JSON.parse(event.data);
                     
-                    // Update the phase indicator
-                    if (data.phase_name) {
+                    // Update the phase indicator (for legacy mode)
+                    if (phaseIndicator && data.phase_name) {
                         phaseIndicator.textContent = data.phase_name;
                     }
-
-                    // If process is done or cancelled, close the connection
-                    if (data.done || data.cancelled) {
-                        eventSource.close();
-                        // Hide loading overlay after a short delay to ensure user sees final status
-                        setTimeout(() => {
-                            loadingOverlay.style.display = 'none';
-                        }, 1000);
-                    }
-                };
-
-                eventSource.onerror = function(event) {
-                    console.error('EventSource error:', event);
-                    eventSource.close();
-                    loadingOverlay.style.display = 'none';
-                };
-                    }
                     
-                    // Update progress bar
-                    if (data.total > 0) {
+                    // Update progress bar (for legacy mode)
+                    if (progressBar && data.total > 0) {
                         const percentage = Math.round((data.current / data.total) * 100);
                         progressBar.style.width = percentage + '%';
                         progressBar.textContent = percentage + '%';
                     }
                     
-                    // Update progress detail text
-                    if (data.address) {
+                    // Update progress detail text (for legacy mode)
+                    if (progressDetail && data.address) {
                         progressDetail.textContent = data.address;
                     }
                     
@@ -737,32 +939,32 @@
                         }
                         
                         // If it was cancelled, show a message
-                        if (data.cancelled === true) {
+                        if (data.cancelled === true && progressDetail) {
                             progressDetail.textContent = 'Operation was cancelled';
                         }
                         
-                        // Hide the loading overlay after a short delay
-                        setTimeout(function() {
-                            loadingOverlay.style.display = 'none';
-                        }, 1000);
+                        // Hide the loading overlay after a short delay (for legacy mode)
+                        if (loadingOverlay) {
+                            setTimeout(function() {
+                                loadingOverlay.style.display = 'none';
+                            }, 1000);
+                        }
                     }
                 };
-                
-                eventSource.onerror = function() {
-                    // Handle connection errors
+
+                eventSource.onerror = function(event) {
+                    console.error('EventSource error:', event);
                     if (eventSource) {
                         eventSource.close();
                         eventSource = null;
                     }
-                    progressDetail.textContent = 'Connection lost. Refreshing page...';
-                    setTimeout(function() {
-                        location.reload();
-                    }, 2000);
+                    if (loadingOverlay) {
+                        loadingOverlay.style.display = 'none';
+                    }
                 };
             }
 
             function cancelProcessing() {
-                // Send cancellation request to server
                 fetch('/cancel', {
                     method: 'POST',
                     headers: {
@@ -771,9 +973,13 @@
                 })
                 .then(response => response.json())
                 .then(data => {
-                    cancelButton.textContent = 'Cancelling...';
-                    cancelButton.disabled = true;
-                    progressDetail.textContent = 'Cancelling operation...';
+                    if (cancelButton) {
+                        cancelButton.textContent = 'Cancelling...';
+                        cancelButton.disabled = true;
+                    }
+                    if (progressDetail) {
+                        progressDetail.textContent = 'Cancelling operation...';
+                    }
                 })
                 .catch(error => {
                     console.error('Error cancelling processing:', error);
@@ -802,23 +1008,28 @@
                             });
                             
                             html += '</table>';
-                            savedRoutesContent.innerHTML = html;
+                            if (savedRoutesContent) {
+                                savedRoutesContent.innerHTML = html;
+                            }
                             
                             // Add event listeners to the view buttons
                             document.querySelectorAll('.view-route-btn').forEach(btn => {
                                 btn.addEventListener('click', function() {
                                     const filename = this.getAttribute('data-filename');
-                                    // TODO: Implement view saved route functionality
-                                    alert('View route: ' + filename);
+                                    window.location.href = '/load_saved_route/' + filename;
                                 });
                             });
                         } else {
-                            savedRoutesContent.innerHTML = '<p>No saved routes found.</p>';
+                            if (savedRoutesContent) {
+                                savedRoutesContent.innerHTML = '<p>No saved routes found.</p>';
+                            }
                         }
                     })
                     .catch(error => {
                         console.error('Error loading saved routes:', error);
-                        savedRoutesContent.innerHTML = '<p>Error loading saved routes. Please try again.</p>';
+                        if (savedRoutesContent) {
+                            savedRoutesContent.innerHTML = '<p>Error loading saved routes. Please try again.</p>';
+                        }
                     });
             }
         });

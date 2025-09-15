@@ -24,6 +24,9 @@ class StationManager:
         """
         Load station data from the Excel file, processing all sheets
         and correlating the data into unified Station objects.
+        
+        Sheet 1: Header row 3 (skip_rows=2)
+        Sheets 2-4: Header row 4 (skip_rows=3)
         """
         self.excel_file = excel_file_path
         logger.info(f"Loading data from {excel_file_path}")
@@ -39,18 +42,18 @@ class StationManager:
             sheet_names = excel.sheet_names
             logger.info(f"Found sheets: {sheet_names}")
             
-            # First, load the main station data from the first sheet
-            self._load_main_station_data(excel, sheet_names[0], skip_rows)
+            # First, load the main station data from the first sheet (header row 3)
+            self._load_main_station_data(excel, sheet_names[0], skip_rows=2)
             
-            # Then process other sheets to enhance station data
+            # Then process other sheets to enhance station data (header row 4)
             if len(sheet_names) > 1 and 'Reinspections' in sheet_names:
-                self._load_reinspection_data(excel, 'Reinspections', skip_rows)
+                self._load_reinspection_data(excel, 'Reinspections', skip_rows=3)
                 
             if len(sheet_names) > 2 and 'Complaints' in sheet_names:
-                self._load_complaint_data(excel, 'Complaints', skip_rows)
+                self._load_complaint_data(excel, 'Complaints', skip_rows=3)
                 
             if len(sheet_names) > 3 and 'Out of Service Pumps' in sheet_names:
-                self._load_out_of_service_data(excel, 'Out of Service Pumps', skip_rows)
+                self._load_out_of_service_data(excel, 'Out of Service Pumps', skip_rows=3)
                 
             # Calculate priority scores for all stations
             for station in self.stations.values():
@@ -71,7 +74,8 @@ class StationManager:
             # Read the sheet
             df = pd.read_excel(excel, sheet_name=sheet_name, skiprows=skip_rows)
             
-            # Remove completely empty rows
+            # Remove completely empty rows but keep track of original length for blank row detection
+            original_df = df.copy()
             df = df.replace(r'^\s*$', np.nan, regex=True)
             df = df.dropna(how='all')
             
@@ -83,8 +87,15 @@ class StationManager:
             col_map = self._identify_columns(df)
             
             # Process each row into a Station object
-            for _, row in df.iterrows():
+            processed_count = 0
+            for idx, row in df.iterrows():
                 try:
+                    # Check if this is a completely blank row in original data
+                    original_row = original_df.loc[idx] if idx in original_df.index else row
+                    if original_row.isna().all() or all(str(val).strip() == '' for val in original_row.values if pd.notna(val)):
+                        logger.info(f"Encountered blank row at index {idx}, stopping Sheet 1 processing")
+                        break
+                    
                     # Skip rows without a business ID
                     if pd.isna(row.get(col_map.get('business_id'))) or row.get(col_map.get('business_id')) == 'Business ID #':
                         continue
@@ -122,7 +133,6 @@ class StationManager:
                             # Convert to datetime if not already
                             if isinstance(insp_date, str):
                                 try:
-                                    from datetime import datetime
                                     # Try common date formats
                                     for fmt in ['%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y', '%Y%m%d']:
                                         try:
@@ -140,10 +150,11 @@ class StationManager:
                                 station.days_since_inspection = max(0, days_diff)
                         
                         self.stations[business_id] = station
+                        processed_count += 1
                 except Exception as e:
                     logger.warning(f"Error processing row: {e}")
                     
-            logger.info(f"Loaded {len(self.stations)} stations from main sheet")
+            logger.info(f"Loaded {processed_count} stations from main sheet")
         except Exception as e:
             logger.error(f"Error loading main station data: {str(e)}", exc_info=True)
     
@@ -172,9 +183,19 @@ class StationManager:
                     # Standardize the business ID by removing decimal points and converting to string
                     business_id = str(row.get(col_map.get('business_id'))).split('.')[0]
                     
-                    # Skip if the station is not in our main data
+                    # If the station is not in our main data, create a minimal station entry
                     if business_id not in self.stations:
-                        continue
+                        logger.info(f"Creating minimal station entry for business ID {business_id} from reinspection sheet")
+                        self.stations[business_id] = Station(
+                            business_id=business_id,
+                            name=row.get(col_map.get('name'), f"Station {business_id}"),
+                            address=row.get(col_map.get('address'), "Address not provided"),
+                            city=row.get(col_map.get('city')),
+                            state=row.get(col_map.get('state')),
+                            zip_code=row.get(col_map.get('zip')),
+                            county=row.get(col_map.get('county'))
+                        )
+                        self.stations[business_id].update_full_address()
                         
                     # Mark as needing reinspection
                     self.stations[business_id].needs_reinspection = True
@@ -216,9 +237,19 @@ class StationManager:
                     # Standardize the business ID by removing decimal points and converting to string
                     business_id = str(row.get(col_map.get('business_id'))).split('.')[0]
                     
-                    # Skip if the station is not in our main data
+                    # If the station is not in our main data, create a minimal station entry
                     if business_id not in self.stations:
-                        continue
+                        logger.info(f"Creating minimal station entry for business ID {business_id} from complaint sheet")
+                        self.stations[business_id] = Station(
+                            business_id=business_id,
+                            name=row.get(col_map.get('name'), f"Station {business_id}"),
+                            address=row.get(col_map.get('address'), "Address not provided"),
+                            city=row.get(col_map.get('city')),
+                            state=row.get(col_map.get('state')),
+                            zip_code=row.get(col_map.get('zip')),
+                            county=row.get(col_map.get('county'))
+                        )
+                        self.stations[business_id].update_full_address()
                         
                     # Mark as having a complaint
                     self.stations[business_id].has_complaint = True
@@ -245,8 +276,8 @@ class StationManager:
         logger.info(f"Loading out of service data from sheet: {sheet_name}")
         
         try:
-            # Read the sheet - use skip_rows=4 specifically for OOS sheet
-            df = pd.read_excel(excel, sheet_name=sheet_name, skiprows=4)
+            # Read the sheet using the passed skip_rows parameter
+            df = pd.read_excel(excel, sheet_name=sheet_name, skiprows=skip_rows)
             
             # Remove completely empty rows
             df = df.replace(r'^\s*$', np.nan, regex=True)
@@ -272,10 +303,19 @@ class StationManager:
                     # Standardize the business ID by removing decimal points and converting to string
                     business_id = str(row.get(business_id_col)).split('.')[0]
                     
-                    # Skip if the station is not in our main data
+                    # If the station is not in our main data, create a minimal station entry
                     if business_id not in self.stations:
-                        logger.debug(f"Business ID {business_id} not found in main data")
-                        continue
+                        logger.info(f"Creating minimal station entry for business ID {business_id} from out-of-service sheet")
+                        self.stations[business_id] = Station(
+                            business_id=business_id,
+                            name=row.get(col_map.get('name'), f"Station {business_id}"),
+                            address=row.get(col_map.get('address'), "Address not provided"),
+                            city=row.get(col_map.get('city')),
+                            state=row.get(col_map.get('state')),
+                            zip_code=row.get(col_map.get('zip')),
+                            county=row.get(col_map.get('county'))
+                        )
+                        self.stations[business_id].update_full_address()
                         
                     # Get out of service pump count (numeric)
                     oos_pumps_col = col_map.get('oos_pumps')
@@ -284,6 +324,7 @@ class StationManager:
                             num_oos = int(float(row.get(oos_pumps_col)))
                             if num_oos > 0:
                                 self.stations[business_id].out_of_service_pumps = num_oos
+                                self.stations[business_id].has_out_of_service_pump = True
                                 logger.debug(f"Set {num_oos} OOS pumps for station {business_id}")
                         except (ValueError, TypeError) as e:
                             logger.warning(f"Error converting OOS pumps for station {business_id}: {e}")

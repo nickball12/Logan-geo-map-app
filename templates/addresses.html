@@ -2,6 +2,7 @@
 <html>
 <head>
     <title>Station Addresses</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
         body { font-family: sans-serif; margin: 2em; }
         .container { max-width: 1600px; margin: 0 auto; }
@@ -273,6 +274,84 @@
         .status-badge.normal {
             background-color: #3498db;
         }
+        
+        .geocode-section {
+            margin: 10px 0;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            background-color: #f9f9f9;
+        }
+        
+        .submit-button {
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 16px;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .submit-button:hover:not(:disabled) {
+            background-color: #1976D2;
+        }
+        
+        .submit-button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        
+        .status-info {
+            margin-top: 10px;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        
+        .status-info.processing {
+            background-color: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        
+        .status-info.success {
+            background-color: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .delete-button {
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            padding: 6px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: background-color 0.2s;
+        }
+        
+        .delete-button:hover {
+            background-color: #c82333;
+        }
+        
+        .delete-button:disabled {
+            background-color: #6c757d;
+            cursor: not-allowed;
+        }
+        
+        .status-info.error {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
     </style>
 </head>
 <body>
@@ -338,7 +417,13 @@
                 </label>
             </div>
             
-
+            <!-- Add Generate Coordinates button -->
+            <div class="geocode-section">
+                <button type="button" class="submit-button" id="geocode-btn" {% if not stations %}disabled{% endif %}>
+                    <i class="fas fa-map-marker-alt"></i> Generate Coordinates
+                </button>
+                <div id="geocode-status" class="status-info" style="display:none;"></div>
+            </div>
         </div>
         
         <table class="address-table" id="addressTable">
@@ -355,11 +440,12 @@
                     <th class="sortable" data-sort="inspection">Last Inspection</th>
                     <th class="sortable" data-sort="priority">Priority Score</th>
                     <th>Actions</th>
+                    <th>Delete</th>
                 </tr>
             </thead>
             <tbody>
-                {% for station in stations %}
-                <tr data-business-id="{{ station.business_id }}">
+                {% for station in addresses %}
+                <tr data-business-id="{{ station.business_id }}" class="{% if station.is_duplicate %}duplicate{% endif %}">
                     <td>{{ station.business_id }}</td>
                     <td>{{ station.name }}</td>
                     <td>{{ station.address }}</td>
@@ -397,6 +483,11 @@
                             <button class="edit-button" onclick="editStation('{{ station.business_id }}')">Save</button>
                         </div>
                     </td>
+                    <td>
+                        <button class="delete-button" onclick="deleteStation('{{ station.business_id }}', this)" title="Delete station">
+                            <i class="fa fa-trash"></i>
+                        </button>
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
@@ -407,12 +498,11 @@
         function filterAddresses() {
             const searchText = document.getElementById('searchBox').value.toLowerCase();
             const duplicateFilter = document.getElementById('duplicateFilter').value;
-            const statusFilter = document.getElementById('statusFilter').value;
             const rows = document.querySelectorAll('#addressTable tbody tr');
             
             rows.forEach(row => {
                 const addressText = row.textContent.toLowerCase();
-                const isDuplicate = row.getAttribute('data-duplicate') === 'true';
+                const isDuplicate = row.classList.contains('duplicate');
                 
                 // Check if row contains the search text
                 let showRow = addressText.includes(searchText);
@@ -422,17 +512,6 @@
                     showRow = false;
                 } else if (duplicateFilter === 'unique' && isDuplicate) {
                     showRow = false;
-                }
-                
-                // Apply status filter
-                if (statusFilter !== 'all') {
-                    const statusCell = row.querySelector('.status-container');
-                    if (statusCell) {
-                        const hasStatusClass = statusCell.querySelector(`.status-badge.${statusFilter}`);
-                        if (!hasStatusClass) {
-                            showRow = false;
-                        }
-                    }
                 }
                 
                 row.style.display = showRow ? '' : 'none';
@@ -586,6 +665,95 @@
         }
     </style>
 </body>
+
+<script>
+    // Generate Coordinates functionality
+    document.addEventListener('DOMContentLoaded', function() {
+        const geocodeBtn = document.getElementById('geocode-btn');
+        const geocodeStatus = document.getElementById('geocode-status');
+        const duplicateFilter = document.getElementById('duplicateFilter');
+        const searchBox = document.getElementById('searchBox');
+        
+        function showStatus(element, message, type) {
+            element.style.display = 'block';
+            element.textContent = message;
+            element.className = 'status-info ' + type;
+        }
+        
+        // Search box functionality
+        if (searchBox) {
+            searchBox.addEventListener('input', filterAddresses);
+        }
+        
+        // Duplicate filter functionality
+        if (duplicateFilter) {
+            duplicateFilter.addEventListener('change', filterAddresses);
+        }
+        
+        if (geocodeBtn) {
+            geocodeBtn.addEventListener('click', function() {
+                showStatus(geocodeStatus, 'Geocoding stations...', 'processing');
+                geocodeBtn.disabled = true;
+                
+                fetch('/geocode_stations', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        showStatus(geocodeStatus, data.message, 'success');
+                        // Optionally refresh the page to show updated coordinates
+                        setTimeout(() => {
+                            window.location.reload();
+                        }, 2000);
+                    } else {
+                        showStatus(geocodeStatus, data.error || 'Geocoding failed', 'error');
+                        geocodeBtn.disabled = false;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    showStatus(geocodeStatus, 'Error geocoding: ' + error.message, 'error');
+                    geocodeBtn.disabled = false;
+                });
+            });
+        }
+    });
+    
+    function deleteStation(businessId, buttonElement) {
+        if (confirm(`Are you sure you want to delete station ${businessId}? This action cannot be undone.`)) {
+            buttonElement.disabled = true;
+            const row = buttonElement.closest('tr');
+            
+            fetch('/delete_station', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ business_id: businessId })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Remove the row from the table
+                    row.remove();
+                    alert(`Station ${businessId} deleted successfully.`);
+                } else {
+                    alert(`Error deleting station: ${data.error}`);
+                    buttonElement.disabled = false;
+                }
+            })
+            .catch(error => {
+                console.error('Error deleting station:', error);
+                alert('Error deleting station. Please try again.');
+                buttonElement.disabled = false;
+            });
+        }
+    }
+</script>
 
 <!-- Move scripts to end of body for proper loading -->
 <script defer src="{{ url_for('static', filename='js/station-edit.js') }}"></script>
