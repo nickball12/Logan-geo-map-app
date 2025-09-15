@@ -1,21 +1,3 @@
-
-# ...existing code...
-
-# Place this after app = Flask(__name__) and all config lines
-
-@app.route('/update_station', methods=['POST'])
-def update_station_api():
-    data = request.get_json()
-    business_id = data.get('business_id')
-    priority_score = data.get('priority_score')
-    last_inspection_date = data.get('last_inspection_date')
-    status = data.get('status')
-    try:
-        # Call your update_station logic (from data_store.py)
-        update_station(business_id, priority_score, last_inspection_date, status)
-        return jsonify({'success': True})
-    except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
 from flask import Flask, render_template, request, redirect, url_for, session, Response, jsonify
 import pandas as pd
 import numpy as np
@@ -220,12 +202,12 @@ def index():
             # Reset cancellation event at the start of processing
             cancellation_event.clear()
             
-            # Extract form data
-            hours_to_work = float(request.form['hours'])
+            # Get form data with defaults
+            skip_rows = int(request.form.get('skip_rows', 3))
+            max_pumps_per_day = int(request.form.get('max_pumps_per_day', 20))
+            hours_to_work = float(request.form.get('hours', 8))  # Default 8 hours
             time_between_stops = int(request.form.get('time_between_stops', 0))
             max_stations = int(request.form.get('max_stations', 0))
-            max_pumps_per_day = int(request.form.get('max_pumps_per_day', 20))
-            skip_rows = int(request.form.get('skip_rows', 3))
             
             # Check if we should use cached results
             use_cache = 'use_cache' in request.form
@@ -311,9 +293,22 @@ def index():
                 status = "Processing uploaded file..."
                 # Check if a file was uploaded
                 if 'file' not in request.files:
-                    error = "No file uploaded. Please upload an Excel file."
-                    return redirect(url_for('index'))
+                    # If no file was uploaded, but we have saved data, that's ok
+                    if has_saved_data():
+                        status = "Using saved station data..."
+                        return redirect(url_for('index'))
+                    else:
+                        error = "No file uploaded and no saved data available. Please upload an Excel file."
+                        return redirect(url_for('index'))
+                        
                 file = request.files['file']
+                if file.filename == '':
+                    if has_saved_data():
+                        status = "Using saved station data..."
+                        return redirect(url_for('index'))
+                    else:
+                        error = "No file selected. Please upload an Excel file."
+                        return redirect(url_for('index'))
                 # Remove all files in uploads directory
                 uploads_dir = app.config['UPLOAD_FOLDER']
                 for f in os.listdir(uploads_dir):
@@ -333,30 +328,35 @@ def index():
                 cache_dir = os.path.join("cache")
                 os.makedirs(cache_dir, exist_ok=True)
                 # Generate cache filename based on input parameters
-                cache_key = f"{file.filename}_{skip_rows}_{sheet_name}"
+                cache_key = f"{file.filename}_{skip_rows}"
                 cache_file = os.path.join(cache_dir, f"{cache_key.replace('/', '_')}.pkl")
                 update_progress(2, 5, "Checking cache", False, 'data', 'Data Preparation')
             
-            # Check status filters
-            include_statuses = []
-            if 'include_normal' in request.form:
-                include_statuses.append('normal')
-            if 'include_complaints' in request.form:
-                include_statuses.append('complaint')
-            if 'include_reinspections' in request.form:
-                include_statuses.append('reinspection')
-            if 'include_out_of_service' in request.form:
-                include_statuses.append('out_of_service')
+            # Get station type filters from form
+            include_normal = 'include_normal' in request.form
+            include_complaints = 'include_complaints' in request.form
+            include_reinspections = 'include_reinspections' in request.form
+            include_out_of_service = 'include_out_of_service' in request.form
             
-            # If no status filters selected, include all
-            if not include_statuses:
-                include_statuses = ['normal', 'complaint', 'reinspection', 'out_of_service']
+            # If no filters selected, include all types
+            if not any([include_normal, include_complaints, include_reinspections, include_out_of_service]):
+                include_normal = include_complaints = include_reinspections = include_out_of_service = True
             
+            # Get filter flags from form
+            include_normal = 'include_normal' in request.form
+            include_complaints = 'include_complaints' in request.form
+            include_reinspections = 'include_reinspections' in request.form
+            include_out_of_service = 'include_out_of_service' in request.form
+
+            # If no filters selected, include all types
+            if not any([include_normal, include_complaints, include_reinspections, include_out_of_service]):
+                include_normal = include_complaints = include_reinspections = include_out_of_service = True
+
             # Plan the optimal route using new route planner
             update_progress(3, 5, "Planning optimal route", False, 'data', 'Route Planning')
             
             route_plan = plan_optimal_route(
-                data_file_path,
+                data_file_path,  # Positional argument for excel_file
                 hours=hours_to_work,
                 max_stations=max_stations if max_stations > 0 else None,
                 max_pumps=max_pumps_per_day,
@@ -364,7 +364,10 @@ def index():
                 progress_callback=update_progress,
                 cancellation_event=cancellation_event,
                 use_cache=use_cache,
-                include_statuses=include_statuses
+                include_normal=include_normal,
+                include_complaints=include_complaints,
+                include_reinspections=include_reinspections,
+                include_out_of_service=include_out_of_service
             )
             
             # Check if operation was cancelled
@@ -411,7 +414,7 @@ def index():
             session['route_plan'] = None
             return redirect(url_for('index'))
     
-    return render_template('new_index.html', 
+    return render_template('index.html', 
                           error=error, 
                           status=status, 
                           route_plan=route_plan,
@@ -420,6 +423,13 @@ def index():
 
 @app.route('/addresses')
 def addresses():
+    station_manager = load_stations()
+    if not station_manager:
+        return redirect(url_for('index', error='No station data available'))
+    
+    # Get all stations and pass them to the template
+    stations = station_manager.get_all_stations()
+    return render_template('addresses.html', stations=stations)
     """Show all extracted addresses with duplicate detection"""
     error = request.args.get('error')
     status = request.args.get('status')
@@ -1188,64 +1198,105 @@ def reset_app():
         if request.method == 'GET' or not confirmed:
             # Show confirmation page
             return render_template('reset_confirmation.html')
+            
+        # List of files to delete individually
+        specific_files = [
+            'travel_time_cache.pkl',
+            'travel_times.csv',
+        ]
         
-        # Clear uploaded files
-        upload_dir = app.config['UPLOAD_FOLDER']
-        for file in os.listdir(upload_dir):
-            if file != '.gitkeep':  # Keep .gitkeep to preserve the directory in git
-                file_path = os.path.join(upload_dir, file)
+        for file in specific_files:
+            if os.path.exists(file):
                 try:
-                    if os.path.isfile(file_path):
-                        os.unlink(file_path)
-                        logger.info(f"Deleted uploaded file: {file_path}")
+                    os.unlink(file)
+                    logger.info(f"Deleted specific file: {file}")
                 except Exception as e:
-                    logger.error(f"Error deleting {file_path}: {e}")
+                    logger.error(f"Error deleting {file}: {e}")
         
-        # Clear geocoding cache
-        cache_dir = 'cache'
-        for file in os.listdir(cache_dir):
-            if file != '.gitkeep':
-                file_path = os.path.join(cache_dir, file)
-                try:
-                    if os.path.isfile(file_path):
-                        os.unlink(file_path)
-                        logger.info(f"Deleted cache file: {file_path}")
-                except Exception as e:
-                    logger.error(f"Error deleting {file_path}: {e}")
+        # Directories to clear
+        dirs_to_clear = [
+            app.config['UPLOAD_FOLDER'],  # Uploaded files
+            'cache',                      # Geocoding cache
+            'output',                     # Saved routes
+            app.config['DATA_FOLDER'],    # Station data
+            '__pycache__'                 # Python cache files
+        ]
         
-        # Clear saved routes in output directory
-        output_dir = 'output'
-        for file in os.listdir(output_dir):
-            if file != '.gitkeep':
-                file_path = os.path.join(output_dir, file)
-                try:
-                    if os.path.isfile(file_path):
-                        os.unlink(file_path)
-                        logger.info(f"Deleted route file: {file_path}")
-                except Exception as e:
-                    logger.error(f"Error deleting {file_path}: {e}")
+        for directory in dirs_to_clear:
+            if os.path.exists(directory):
+                for file in os.listdir(directory):
+                    if file != '.gitkeep':  # Keep .gitkeep to preserve directories in git
+                        file_path = os.path.join(directory, file)
+                        try:
+                            if os.path.isfile(file_path):
+                                os.unlink(file_path)
+                                logger.info(f"Deleted file: {file_path}")
+                            elif os.path.isdir(file_path):
+                                shutil.rmtree(file_path)
+                                logger.info(f"Deleted directory: {file_path}")
+                        except Exception as e:
+                            logger.error(f"Error deleting {file_path}: {e}")
         
-        # Clear saved station data
-        data_dir = app.config['DATA_FOLDER']
-        for file in os.listdir(data_dir):
-            if file != '.gitkeep':
-                file_path = os.path.join(data_dir, file)
-                try:
-                    if os.path.isfile(file_path):
-                        os.unlink(file_path)
-                        logger.info(f"Deleted data file: {file_path}")
-                except Exception as e:
-                    logger.error(f"Error deleting {file_path}: {e}")
-        
-        # Reset geocode cache in memory
+        # Reset in-memory caches
         import new_route_planner
         new_route_planner.geocode_cache = {}
+        
+        # Clear the global station manager
+        global _station_manager
+        _station_manager = None
         
         return redirect(url_for('index', status="Application data has been reset successfully"))
         
     except Exception as e:
         logger.error(f"Error resetting app: {e}", exc_info=True)
         return redirect(url_for('index', error=f"Error resetting application data: {str(e)}"))
+
+@app.route('/edit_station', methods=['POST'])
+def edit_station():
+    try:
+        data = request.json
+        business_id = data.get('business_id')
+        if not business_id:
+            return jsonify({'error': 'Business ID is required'}), 400
+
+        station_manager = load_stations()
+        if not station_manager:
+            return jsonify({'error': 'Failed to load station data'}), 500
+
+        station = station_manager.get_station_by_id(business_id)
+        if not station:
+            return jsonify({'error': 'Station not found'}), 404
+
+        # Update station attributes
+        if 'last_inspection_date' in data:
+            station.last_inspection_date = data['last_inspection_date'] if data['last_inspection_date'] else None
+        if 'priority_score' in data:
+            station.priority_score = float(data['priority_score'])
+        if 'statuses' in data:
+            # Reset all status flags
+            station.needs_reinspection = False
+            station.has_complaint = False
+            station.out_of_service_pumps = 0
+            
+            # Set new statuses (multiple can be selected)
+            statuses = data['statuses']
+            if 'reinspection' in statuses:
+                station.needs_reinspection = True
+            if 'complaint' in statuses:
+                station.has_complaint = True
+            if 'out_of_service' in statuses:
+                station.out_of_service_pumps = station.num_pumps
+        if 'skipped' in data:
+            station.skipped = data['skipped']
+        if 'notes' in data:
+            station.notes = data['notes']
+
+        # Save updated stations
+        save_stations(station_manager)
+        
+        return jsonify({'success': True, 'message': 'Station updated successfully'})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))

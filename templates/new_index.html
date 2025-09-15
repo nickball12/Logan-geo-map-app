@@ -275,16 +275,103 @@
         .checkbox-group input[type="checkbox"] {
             margin-right: 8px;
         }
+        /* Upload section styles */
+        .upload-section {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .upload-section h2 {
+            color: #3498db;
+            margin-top: 0;
+            margin-bottom: 20px;
+        }
+        
+        .file-upload {
+            margin-bottom: 15px;
+        }
+        
+        input[type="file"] {
+            padding: 8px;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            width: 100%;
+            max-width: 400px;
+        }
+        
+        .submit-button {
+            background-color: #28a745;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background-color 0.3s;
+        }
+        
+        .submit-button:hover {
+            background-color: #218838;
+        }
+        
+        /* Error and status message styles */
+        .error-message {
+            background-color: #f8d7da;
+            color: #721c24;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            border: 1px solid #f5c6cb;
+        }
+        
+        .status-message {
+            background-color: #d4edda;
+            color: #155724;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            border: 1px solid #c3e6cb;
+        }
     </style>
 </head>
 <body>
     <div class="header-container">
         <h1>Station Route Planner</h1>
         <div class="navigation">
-            <a href="/addresses">View All Addresses</a>
-            <a href="/reset_app" class="reset-button">Reset App Data</a>
+            <a href="{{ url_for('addresses') }}">View All Addresses</a>
+            <a href="{{ url_for('reset_app') }}" class="reset-button">Reset App Data</a>
         </div>
     </div>
+
+    <!-- Upload Form Section -->
+    <div class="upload-section">
+        <h2>Upload Station Data</h2>
+        <form action="/" method="post" enctype="multipart/form-data">
+            <div class="form-group file-upload">
+                <label for="file">Excel File:</label>
+                <input type="file" id="file" name="file" accept=".xlsx,.xls" required>
+                <div class="file-format-hint">Upload your Excel file containing station data</div>
+            </div>
+            <button type="submit" class="submit-button">
+                <i class="fas fa-upload"></i> Upload and Process
+            </button>
+        </form>
+    </div>
+
+    {% if error %}
+    <div class="error-message">
+        {{ error }}
+    </div>
+    {% endif %}
+
+    {% if status %}
+    <div class="status-message">
+        {{ status }}
+    </div>
+    {% endif %}
 
     <!-- Loading Overlay -->
     <div id="loading-overlay">

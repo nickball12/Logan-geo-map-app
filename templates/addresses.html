@@ -5,6 +5,153 @@
     <style>
         body { font-family: sans-serif; margin: 2em; }
         .container { max-width: 1600px; margin: 0 auto; }
+        .sortable {
+            cursor: pointer;
+            position: relative;
+            padding-right: 20px;
+        }
+        .sortable:after {
+            content: '↕';
+            position: absolute;
+            right: 8px;
+            color: #999;
+        }
+        .sortable.sorted-asc:after {
+            content: '↑';
+            color: #333;
+        }
+        .sortable.sorted-desc:after {
+            content: '↓';
+            color: #333;
+        }
+        .edit-field { 
+            width: 120px;
+            padding: 6px 8px;
+            margin: 2px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .edit-status {
+            height: auto;
+            min-width: 150px;
+        }
+        .edit-notes {
+            width: 200px;
+        }
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            margin: 4px 0;
+            font-size: 14px;
+            white-space: nowrap;
+        }
+        .edit-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 4px;
+        }
+        .status-controls {
+            min-width: 180px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            padding: 8px;
+            margin: 0;
+        }
+        .status-controls .checkbox-label {
+            margin: 2px 0;
+        }
+        td {
+            vertical-align: top;
+            padding: 8px;
+        }
+        .edit-field:focus {
+            outline: none;
+            border-color: #3498db;
+            box-shadow: 0 0 3px rgba(52, 152, 219, 0.5);
+        }
+        .edit-button {
+            background-color: #2ecc71;
+            color: white;
+            border: none;
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background-color 0.2s;
+        }
+        .edit-button:hover {
+            background-color: #27ae60;
+        }
+        .edit-button:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+        .edit-button.success {
+            background-color: #27ae60;
+        }
+        .edit-button.error {
+            background-color: #e74c3c;
+        }
+        .filter-controls {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 20px;
+            padding: 12px;
+            background-color: #f5f5f5;
+            border-radius: 6px;
+            border: 1px solid #ddd;
+        }
+        
+        .status-filter-group {
+            display: flex;
+            gap: 16px;
+            align-items: center;
+        }
+
+        .status-filter-group .checkbox-label {
+            background-color: white;
+            padding: 6px 12px;
+            border-radius: 4px;
+            border: 1px solid #ddd;
+            transition: all 0.2s;
+        }
+
+        .status-filter-group .checkbox-label:hover {
+            background-color: #f0f0f0;
+        }
+
+        .status-filter-group .checkbox-label.disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .github-link {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            background-color: #333;
+            color: white;
+            text-decoration: none;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            transition: background-color 0.2s;
+        }
+        .github-link:hover {
+            background-color: #555;
+        }
+        .github-icon {
+            width: 20px;
+            height: 20px;
+            fill: white;
+        }
         .header-container { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
         .navigation { display: flex; gap: 10px; }
         .navigation a { 
@@ -163,104 +310,99 @@
         </div>
         
         <div class="controls">
-            <input type="text" id="searchBox" class="search-box" placeholder="Search addresses..." onkeyup="filterAddresses()">
+            <input type="text" id="searchBox" class="search-box" placeholder="Search addresses...">
             
-            <select id="duplicateFilter" class="filter-select" onchange="filterAddresses()">
+            <select id="duplicateFilter" class="filter-select">
                 <option value="all">Show All Addresses</option>
                 <option value="duplicates">Show Only Duplicates</option>
                 <option value="unique">Show Only Unique</option>
             </select>
             
-            <select id="statusFilter" class="filter-select" onchange="filterAddresses()">
-                <option value="all">All Statuses</option>
-                <option value="reinspection">Reinspection</option>
-                <option value="complaint">Complaint</option>
-                <option value="out-of-service">Out of Service</option>
-                <option value="normal">Normal</option>
-            </select>
+            <div class="status-filter-group">
+                <label><strong>Filter by Status:</strong></label>
+                <label class="checkbox-label" for="filter-normal">
+                    <input type="checkbox" id="filter-normal" checked>
+                    Normal
+                </label>
+                <label class="checkbox-label" for="filter-reinspection">
+                    <input type="checkbox" id="filter-reinspection" checked>
+                    Needs Reinspection
+                </label>
+                <label class="checkbox-label" for="filter-complaint">
+                    <input type="checkbox" id="filter-complaint" checked>
+                    Complaint
+                </label>
+                <label class="checkbox-label" for="filter-out-of-service">
+                    <input type="checkbox" id="filter-out-of-service" checked>
+                    Out of Service
+                </label>
+            </div>
             
-            <select id="sortBy" class="filter-select" onchange="sortAddresses()">
-                <option value="name">Sort by Name</option>
-                <option value="address">Sort by Address</option>
-                <option value="city">Sort by City</option>
-                <option value="priority">Sort by Priority</option>
-            </select>
+
         </div>
         
         <table class="address-table" id="addressTable">
             <thead>
                 <tr>
-                    <th>Name</th>
-                    <th>Address</th>
-                    <th>City</th>
-                    <th>State</th>
-                    <th>ZIP</th>
-                    <th>County</th>
-                    <th>Coordinates</th>
-                    <th>Priority Score</th>
-                    <th>Last Inspection</th>
-                    <th>Days Since</th>
-                    <th>Status</th>
+                    <th class="sortable" data-sort="business-id">Business ID</th>
+                    <th class="sortable" data-sort="name">Name</th>
+                    <th class="sortable" data-sort="address">Address</th>
+                    <th class="sortable" data-sort="city">City</th>
+                    <th class="sortable" data-sort="state">State</th>
+                    <th class="sortable" data-sort="zip">ZIP</th>
+                    <th class="sortable" data-sort="county">County</th>
+                    <th class="sortable" data-sort="status">Status</th>
+                    <th class="sortable" data-sort="inspection">Last Inspection</th>
+                    <th class="sortable" data-sort="priority">Priority Score</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
-                {% for address in addresses %}
-                <tr class="{% if address.is_duplicate %}duplicate{% endif %}" data-address="{{ address.full_address }}" data-duplicate="{{ address.is_duplicate|lower }}" data-business-id="{{ address.business_id }}">
-                    <td class="{% if editable %}editable-cell{% endif %}" data-field="name">{{ address.name }}</td>
-                    <td class="{% if editable %}editable-cell{% endif %}" data-field="address">{{ address.address }}</td>
-                    <td class="{% if editable %}editable-cell{% endif %}" data-field="city">{{ address.city }}</td>
-                    <td class="{% if editable %}editable-cell{% endif %}" data-field="state">{{ address.state }}</td>
-                    <td class="{% if editable %}editable-cell{% endif %}" data-field="zip_code">{{ address.zip_code }}</td>
-                    <td class="{% if editable %}editable-cell{% endif %}" data-field="county">{{ address.county }}</td>
-                    <td>{{ address.coordinates }}</td>
-                    <td><input type="number" value="{{ address.priority_score }}" class="edit-priority" style="width:70px"></td>
-                    <td><input type="date" value="{{ address.last_inspection_date }}" class="edit-inspection" style="width:130px"></td>
-                    <td>{{ address.days_since_inspection }}</td>
+                {% for station in stations %}
+                <tr data-business-id="{{ station.business_id }}">
+                    <td>{{ station.business_id }}</td>
+                    <td>{{ station.name }}</td>
+                    <td>{{ station.address }}</td>
+                    <td>{{ station.city }}</td>
+                    <td>{{ station.state }}</td>
+                    <td>{{ station.zip_code }}</td>
+                    <td>{{ station.county }}</td>
                     <td>
-                        <select class="edit-status">
-                            <option value="normal" {% if not address.has_complaint and not address.needs_reinspection and address.out_of_service_pumps == 0 %}selected{% endif %}>Normal</option>
-                            <option value="complaint" {% if address.has_complaint %}selected{% endif %}>Complaint</option>
-                            <option value="reinspection" {% if address.needs_reinspection %}selected{% endif %}>Reinspection</option>
-                            <option value="out_of_service" {% if address.out_of_service_pumps > 0 %}selected{% endif %}>Out of Service</option>
-                        </select>
-                        <button onclick="saveRow(this)" style="margin-left:8px;">Save</button>
+                        <div class="edit-controls status-controls">
+                            <label class="checkbox-label">
+                                <input type="checkbox" class="edit-needs-reinspection" onchange="handleStationStatusChange(this.closest('.status-controls'))" {% if station.needs_reinspection %}checked{% endif %}>
+                                Needs Reinspection
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" class="edit-has-complaint" onchange="handleStationStatusChange(this.closest('.status-controls'))" {% if station.has_complaint %}checked{% endif %}>
+                                Complaint
+                            </label>
+                            <label class="checkbox-label">
+                                <input type="checkbox" class="edit-has-out-of-service" onchange="handleStationStatusChange(this.closest('.status-controls'))" {% if station.has_out_of_service_pump %}checked{% endif %}>
+                                Out of Service
+                            </label>
+                        </div>
                     </td>
-    <script>
-    function saveRow(btn) {
-        const row = btn.closest('tr');
-        const businessId = row.getAttribute('data-business-id');
-        const priority = row.querySelector('.edit-priority').value;
-        const inspection = row.querySelector('.edit-inspection').value;
-        const status = row.querySelector('.edit-status').value;
-        fetch('/update_station', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ business_id: businessId, priority_score: priority, last_inspection_date: inspection, status: status })
-        })
-        .then(r => r.json())
-        .then(data => {
-            if (data.success) {
-                btn.textContent = 'Saved!';
-                setTimeout(() => { btn.textContent = 'Save'; }, 1200);
-            } else {
-                btn.textContent = 'Error';
-                setTimeout(() => { btn.textContent = 'Save'; }, 1200);
-            }
-        })
-        .catch(() => {
-            btn.textContent = 'Error';
-            setTimeout(() => { btn.textContent = 'Save'; }, 1200);
-        });
-    }
-    </script>
+                    <td>
+                        <input type="date" class="edit-field edit-inspection-date" value="{{ station.last_inspection_date.strftime('%Y-%m-%d') if station.last_inspection_date and station.last_inspection_date is not none and station.last_inspection_date is not number else '' }}">
+                    </td>
+                    <td><input type="number" step="0.1" class="edit-field edit-priority-score" value="{{ station.priority_score }}"></td>
+                    <td>
+                        <div class="edit-controls">
+                            <label class="checkbox-label">
+                                <input type="checkbox" class="edit-skipped" {% if station.skipped %}checked{% endif %}>
+                                Skipped
+                            </label>
+                            <input type="text" class="edit-field edit-notes" placeholder="Notes..." value="{{ station.notes }}">
+                            <button class="edit-button" onclick="editStation('{{ station.business_id }}')">Save</button>
+                        </div>
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
         </table>
     </div>
-    <footer style="margin-top:40px; text-align:center; color:#888;">
-        <a href="https://github.com/nickball12/Logan-geo-map-app" target="_blank" style="color:#3498db; text-decoration:none;">View this project on GitHub</a>
-    </footer>
+    
     <script>
         function filterAddresses() {
             const searchText = document.getElementById('searchBox').value.toLowerCase();
@@ -444,4 +586,9 @@
         }
     </style>
 </body>
+
+<!-- Move scripts to end of body for proper loading -->
+<script defer src="{{ url_for('static', filename='js/station-edit.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/table-sort.js') }}"></script>
+<script defer src="{{ url_for('static', filename='js/status-filter.js') }}"></script>
 </html>

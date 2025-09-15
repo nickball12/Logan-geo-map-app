@@ -25,22 +25,25 @@ class Station:
         self.last_inspection_date = None
         self.days_since_inspection = None
         
-        # Reinspection info
+        # Station statuses (each can be independently set)
         self.needs_reinspection = False
         self.reinspection_reason = None
         
-        # Complaint info
         self.has_complaint = False
         self.complaint_details = None
         self.complaint_date = None
         
-        # Out of service pumps
+        self.has_out_of_service_pump = False
         self.out_of_service_pumps = 0
         self.out_of_service_details = None
         self.days_out_of_service = 0
         
         # Priority factors (for optimization)
         self.priority_score = 0
+        
+        # Additional tracking fields
+        self.skipped = False
+        self.notes = ""
         
     def update_full_address(self):
         """Generate the full address for geocoding"""

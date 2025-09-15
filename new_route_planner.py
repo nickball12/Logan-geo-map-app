@@ -1,5 +1,9 @@
 import pandas as pd
-import numpy as np
+import numpy# Main entry point for route planning - all other route planning functions should call this
+def plan_optimal_route(excel_file, hours=8, max_stations=None, max_pumps=20, time_between_stops=0,
+                       progress_callback=None, cancellation_event=None, use_cache=True,
+                       include_normal=True, include_complaints=True, include_reinspections=True,
+                       include_out_of_service=True):np
 from datetime import datetime
 import time
 from geopy.distance import geodesic
@@ -29,6 +33,31 @@ STARTING_LOCATION = {
 # Geocoding cache to store previously geocoded addresses
 GEOCODE_CACHE_FILE = 'cache/geocode_cache.pkl'
 geocode_cache = {}
+
+def plan_optimal_route(excel_file, hours=8, max_stations=None, max_pumps=20, time_between_stops=10, 
+                      progress_callback=None, cancellation_event=None, use_cache=True,
+                      include_normal=True, include_complaints=True, include_reinspections=True,
+                      include_out_of_service=True):
+    """
+    Plan an optimal route for station inspections.
+    
+    Args:
+        excel_file (str): Path to Excel file with station data
+        hours (float): Number of hours available for inspections
+        max_stations (int, optional): Maximum number of stations to include
+        max_pumps (int): Maximum number of pumps to inspect in a day
+        time_between_stops (int): Additional time to add between stops
+        progress_callback (function, optional): Callback for progress updates
+        cancellation_event (Event, optional): Event to signal cancellation
+        use_cache (bool): Whether to use cached geocoding results
+        include_normal (bool): Include stations with no special flags
+        include_complaints (bool): Include stations with complaints
+        include_reinspections (bool): Include stations needing reinspection
+        include_out_of_service (bool): Include stations with out-of-service pumps
+        
+    Returns:
+        List of dictionaries with route plan
+    """
 
 # Load geocoding cache from file if it exists
 try:
@@ -705,26 +734,23 @@ def plan_optimal_route(excel_file, hours=8, max_stations=None, max_pumps=20, tim
     # Get all stations first
     all_stations = station_manager.get_all_stations()
     
-    # Filter stations by status if specified
-    if include_statuses is not None:
-        filtered_stations = []
-        for station in all_stations:
-            # Check if station status matches any of the included statuses
-            if 'normal' in include_statuses and not station.has_complaint and not station.needs_reinspection and station.out_of_service_pumps == 0:
-                filtered_stations.append(station)
-            elif 'complaint' in include_statuses and station.has_complaint:
-                filtered_stations.append(station)
-            elif 'reinspection' in include_statuses and station.needs_reinspection:
-                filtered_stations.append(station)
-            elif 'out_of_service' in include_statuses and station.out_of_service_pumps > 0:
-                filtered_stations.append(station)
+    # Filter stations based on their type flags
+    filtered_stations = []
+    for station in all_stations:
+        # Normal stations (no special flags)
+        is_normal = (not station.has_complaint and 
+                    not station.needs_reinspection and 
+                    not station.has_out_of_service_pump)
         
-        # Use filtered stations and sort by priority
-        stations = sorted(filtered_stations, key=lambda x: x.priority_score, reverse=True)
-        logger.info(f"Filtered to {len(stations)} stations based on status filters: {include_statuses}")
-    else:
-        # Get stations sorted by priority (default behavior)
-        stations = station_manager.get_high_priority_stations()
+        if ((include_normal and is_normal) or
+            (include_complaints and station.has_complaint) or
+            (include_reinspections and station.needs_reinspection) or
+            (include_out_of_service and station.has_out_of_service_pump)):
+            filtered_stations.append(station)
+    
+    # Use filtered stations and sort by priority
+    stations = sorted(filtered_stations, key=lambda x: x.priority_score, reverse=True)
+    logger.info(f"Filtered to {len(stations)} stations based on type filters")
         
     logger.info(f"Using {len(stations)} stations, sorted by priority")
     

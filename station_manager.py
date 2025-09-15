@@ -118,7 +118,21 @@ class StationManager:
                         # Get last inspection date
                         last_insp_col = col_map.get('last_inspection_date')
                         if last_insp_col and not pd.isna(row.get(last_insp_col)):
-                            station.last_inspection_date = row.get(last_insp_col)
+                            insp_date = row.get(last_insp_col)
+                            # Convert to datetime if not already
+                            if isinstance(insp_date, str):
+                                try:
+                                    from datetime import datetime
+                                    # Try common date formats
+                                    for fmt in ['%Y-%m-%d', '%m/%d/%Y', '%d/%m/%Y', '%Y%m%d']:
+                                        try:
+                                            insp_date = datetime.strptime(insp_date, fmt)
+                                            break
+                                        except ValueError:
+                                            continue
+                                except Exception:
+                                    insp_date = None
+                            station.last_inspection_date = insp_date if isinstance(insp_date, datetime) else None
                             
                             # Calculate days since inspection
                             if isinstance(station.last_inspection_date, datetime):
@@ -231,8 +245,8 @@ class StationManager:
         logger.info(f"Loading out of service data from sheet: {sheet_name}")
         
         try:
-            # Read the sheet
-            df = pd.read_excel(excel, sheet_name=sheet_name, skiprows=skip_rows)
+            # Read the sheet - use skip_rows=4 specifically for OOS sheet
+            df = pd.read_excel(excel, sheet_name=sheet_name, skiprows=4)
             
             # Remove completely empty rows
             df = df.replace(r'^\s*$', np.nan, regex=True)
@@ -241,42 +255,55 @@ class StationManager:
             # Identify columns
             col_map = self._identify_columns(df)
             
+            # Log column mapping for debugging
+            logger.debug(f"OOS sheet column mapping: {col_map}")
+            
             # Process each row
             for _, row in df.iterrows():
                 try:
                     # Skip rows without a business ID
-                    if pd.isna(row.get(col_map.get('business_id'))) or row.get(col_map.get('business_id')) == 'Business ID #':
-                        continue
-                        
+                    business_id_col = col_map.get('business_id')
+                    if not business_id_col or pd.isna(row.get(business_id_col)):
+                        # Try using the explicit column name if mapping failed
+                        business_id_col = 'Business ID #'
+                        if pd.isna(row.get(business_id_col)):
+                            continue
+                    
                     # Standardize the business ID by removing decimal points and converting to string
-                    business_id = str(row.get(col_map.get('business_id'))).split('.')[0]
+                    business_id = str(row.get(business_id_col)).split('.')[0]
                     
                     # Skip if the station is not in our main data
                     if business_id not in self.stations:
+                        logger.debug(f"Business ID {business_id} not found in main data")
                         continue
                         
-                    # Get out of service details
+                    # Get out of service pump count (numeric)
                     oos_pumps_col = col_map.get('oos_pumps')
                     if oos_pumps_col and not pd.isna(row.get(oos_pumps_col)):
                         try:
-                            self.stations[business_id].out_of_service_pumps = int(row.get(oos_pumps_col))
-                        except (ValueError, TypeError):
-                            # If we can't convert to int, default to 0
-                            self.stations[business_id].out_of_service_pumps = 0
+                            num_oos = int(float(row.get(oos_pumps_col)))
+                            if num_oos > 0:
+                                self.stations[business_id].out_of_service_pumps = num_oos
+                                logger.debug(f"Set {num_oos} OOS pumps for station {business_id}")
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"Error converting OOS pumps for station {business_id}: {e}")
                     
-                    # Get OOS details
+                    # Get OOS details (text description)
                     oos_details_col = col_map.get('oos_details')
                     if oos_details_col and not pd.isna(row.get(oos_details_col)):
-                        self.stations[business_id].out_of_service_details = row.get(oos_details_col)
+                        details = str(row.get(oos_details_col))
+                        self.stations[business_id].out_of_service_details = details
+                        logger.debug(f"Set OOS details for station {business_id}: {details}")
                     
                     # Get days out of service
-                    days_oos_col = col_map.get('days_oos')
+                    days_oos_col = col_map.get('days_oos', 'Elapsed Days OOS')  # Fallback to explicit name
                     if days_oos_col and not pd.isna(row.get(days_oos_col)):
                         try:
-                            self.stations[business_id].days_out_of_service = int(row.get(days_oos_col))
-                        except (ValueError, TypeError):
-                            # If we can't convert to int, default to 0
-                            self.stations[business_id].days_out_of_service = 0
+                            days = int(float(row.get(days_oos_col)))
+                            self.stations[business_id].days_out_of_service = days
+                            logger.debug(f"Set {days} OOS days for station {business_id}")
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"Error converting OOS days for station {business_id}: {e}")
                     
                 except Exception as e:
                     logger.warning(f"Error processing OOS row: {e}")
@@ -302,12 +329,12 @@ class StationManager:
             'zip': ['zip'],
             'county': ['county'],
             'num_pumps': ['no. of pumps', 'number of pumps'],
-            'last_inspection_date': ['last inspection', 'last insp'],
+            'last_inspection_date': ['last inspection', 'last insp', 'regular inspect'],
             'notes': ['notes'],
             'viol_date': ['viol date', 'violation date'],
-            'oos_pumps': ['oos pumps'],
-            'oos_details': ['out of service pumps'],
-            'days_oos': ['elapsed days oos', 'days oos']
+            'oos_pumps': ['oos pumps  112', 'oos pumps'],  # Updated to match exact column name
+            'oos_details': ['out of service pumps'],  # This matches the details column
+            'days_oos': ['elapsed days oos', 'elapsed days o']  # Handle truncated column name
         }
         
         # Helper function to convert column index to Excel column letter
