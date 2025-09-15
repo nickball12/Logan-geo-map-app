@@ -291,46 +291,33 @@ def index():
             else:
                 # Process uploaded file
                 status = "Processing uploaded file..."
-                
                 # Check if a file was uploaded
                 if 'file' not in request.files:
                     error = "No file uploaded. Please upload an Excel file."
                     return redirect(url_for('index'))
-                    
                 file = request.files['file']
-                
-                # Get sheet name if provided, otherwise use the first sheet
-                sheet_name = request.form.get('sheet_name', '0')
-                if sheet_name.isdigit():
-                    sheet_name = int(sheet_name)
-            use_cache = 'use_cache' in request.form
-            
-            # Get sheet name if provided, otherwise use the first sheet
-            sheet_name = request.form.get('sheet_name', '0')
-            if sheet_name.isdigit():
-                sheet_name = int(sheet_name)
-            
-            # Update progress for file processing phase
-            update_progress(0, 5, "Preparing to process file", False, 'data', 'Data Preparation')
-            
-            # Save the uploaded file
-            data_file_path = os.path.join("uploads", file.filename)
-            os.makedirs("uploads", exist_ok=True)
-            file.save(data_file_path)
-            
-            # Store the file path in the session for later use
-            session['latest_file'] = data_file_path
-            
-            update_progress(1, 5, f"Saved file: {file.filename}", False, 'data', 'Data Preparation')
-            
-            # Create cache directory if it doesn't exist
-            cache_dir = os.path.join("cache")
-            os.makedirs(cache_dir, exist_ok=True)
-            
-            # Generate cache filename based on input parameters
-            cache_key = f"{file.filename}_{skip_rows}_{sheet_name}"
-            cache_file = os.path.join(cache_dir, f"{cache_key.replace('/', '_')}.pkl")
-            update_progress(2, 5, "Checking cache", False, 'data', 'Data Preparation')
+                # Remove all files in uploads directory
+                uploads_dir = app.config['UPLOAD_FOLDER']
+                for f in os.listdir(uploads_dir):
+                    file_path = os.path.join(uploads_dir, f)
+                    if os.path.isfile(file_path):
+                        os.remove(file_path)
+                # Save the new uploaded file
+                data_file_path = os.path.join(uploads_dir, file.filename)
+                os.makedirs(uploads_dir, exist_ok=True)
+                file.save(data_file_path)
+                # Store the file path in the session for later use
+                session['latest_file'] = data_file_path
+                update_progress(1, 5, f"Saved file: {file.filename}", False, 'data', 'Data Preparation')
+                # Optionally clear any persisted or in-memory data here
+                # For example, call reset_app() or similar logic if needed
+                # Create cache directory if it doesn't exist
+                cache_dir = os.path.join("cache")
+                os.makedirs(cache_dir, exist_ok=True)
+                # Generate cache filename based on input parameters
+                cache_key = f"{file.filename}_{skip_rows}_{sheet_name}"
+                cache_file = os.path.join(cache_dir, f"{cache_key.replace('/', '_')}.pkl")
+                update_progress(2, 5, "Checking cache", False, 'data', 'Data Preparation')
             
             # Check status filters
             include_statuses = []
