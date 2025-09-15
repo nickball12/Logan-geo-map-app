@@ -1243,4 +1243,5 @@ def reset_app():
         return redirect(url_for('index', error=f"Error resetting application data: {str(e)}"))
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5002)
+    port = int(os.environ.get("PORT", 10000))
+    app.run(debug=True, host="0.0.0.0", port=port)
